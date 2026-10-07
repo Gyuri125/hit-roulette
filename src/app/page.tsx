@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import tracksData from "@/data/tracks.json";
-import { MusicCard } from "@/components/MusicCard";
-import { Track } from "@/types/track";
-import { Play, Pause, SkipForward, Volume2 } from "lucide-react";
+import tracksData from "../data/tracks.json";
+import { MusicCard } from "../components/MusicCard";
+import { RouletteWheel } from "../components/RouletteWheel";
+import { Track } from "../types/track";
+import { Play, Pause, SkipForward, Volume2, Timer } from "lucide-react";
 import confetti from "canvas-confetti";
 
 export default function Home() {
@@ -12,11 +13,14 @@ export default function Home() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [timeLimit, setTimeLimit] = useState<number>(30); // 30 mp alapértelmezett korlát
+  const [timeLeft, setTimeLeft] = useState<number>(30);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const currentTrack = tracks[currentIndex];
 
-  // Billentyűzet kezelés (Space: flip + stop zene)
+  // Billentyűzet figyelés (Space -> felfedés és stop)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space") {
@@ -28,30 +32,49 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isFlipped, isPlaying]);
 
+  // Visszaszámláló időzítő lejátszás közben
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isPlaying && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            handleStop();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isPlaying, timeLeft]);
+
   const handleFlip = () => {
     const nextFlipped = !isFlipped;
     setIsFlipped(nextFlipped);
 
-    // Ha megfordítjuk és felfedjük, állítsuk meg a zenét és lőjünk konfettit!
     if (nextFlipped) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      }
+      handleStop();
       confetti({
-        particleCount: 80,
-        spread: 70,
+        particleCount: 90,
+        spread: 75,
         origin: { y: 0.6 },
-        colors: ["#f59e0b", "#ec4899", "#8b5cf6"]
+        colors: ["#f59e0b", "#ec4899", "#8b5cf6"],
       });
     }
+  };
+
+  const handleStop = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setIsPlaying(false);
   };
 
   const handlePlayToggle = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+      handleStop();
     } else {
       audioRef.current.play();
       setIsPlaying(true);
@@ -60,64 +83,82 @@ export default function Home() {
 
   const handleNextTrack = () => {
     setIsFlipped(false);
-    setIsPlaying(false);
+    handleStop();
+    setTimeLeft(timeLimit);
     const nextIdx = (currentIndex + 1) % tracks.length;
     setCurrentIndex(nextIdx);
     if (audioRef.current) {
-      audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
   };
 
   return (
-    <main className="min-h-screen bg-black text-white flex flex-col items-center justify-between p-6">
-      {/* Header */}
-      <header className="w-full max-w-xl flex justify-between items-center py-4 border-b border-neutral-900">
-        <h1 className="text-xl font-black tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-rose-400">
-          HIT-ROULETTE
-        </h1>
-        <div className="text-sm font-mono text-neutral-500">
-          {currentIndex + 1} / {tracks.length}
+    <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-4 md:p-8 select-none">
+      {/* Fejléc */}
+      <header className="w-full max-w-4xl flex justify-between items-center py-4 border-b border-neutral-800/80">
+        <div>
+          <h1 className="text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
+            HIT-ROULETTE
+          </h1>
+          <p className="text-xs text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs font-mono">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400">
+            <Timer className="w-4 h-4 text-amber-400" />
+            <span>{timeLeft}s</span>
+          </div>
+          <span className="text-neutral-500">{currentIndex + 1} / {tracks.length}</span>
         </div>
       </header>
 
-      {/* Rejtett Audio Tag */}
+      {/* Audio Lejátszó elem */}
       <audio
         ref={audioRef}
         src={currentTrack.audioUrl}
         onEnded={() => setIsPlaying(false)}
       />
 
-      {/* A Kártya */}
-      <div className="my-auto py-8">
-        <MusicCard
-          track={currentTrack}
-          isFlipped={isFlipped}
-          onFlip={handleFlip}
-        />
+      {/* Fő játéktér: Balra a Rulett, Jobbra a Kártya */}
+      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 items-center justify-items-center my-auto py-6">
+        {/* Bal oldal: Rulett kerék */}
+        <div className="flex flex-col items-center justify-center p-6 rounded-3xl bg-neutral-900/40 border border-neutral-800/50 backdrop-blur-sm w-full max-w-sm">
+          <h2 className="text-xs font-bold text-neutral-400 tracking-wider uppercase mb-4">1. Pörgesd ki a témát</h2>
+          <RouletteWheel onSpinEnd={(cat) => setActiveCategory(cat)} />
+        </div>
+
+        {/* Jobb oldal: Hitster kártya */}
+        <div className="flex flex-col items-center justify-center w-full max-w-sm">
+          <h2 className="text-xs font-bold text-neutral-400 tracking-wider uppercase mb-4">2. Találd ki és fordítsd fel</h2>
+          <MusicCard
+            track={currentTrack}
+            isFlipped={isFlipped}
+            onFlip={handleFlip}
+          />
+        </div>
       </div>
 
-      {/* Vezérlőpult */}
-      <footer className="w-full max-w-md bg-neutral-900/60 backdrop-blur-md border border-neutral-800 rounded-2xl p-4 flex items-center justify-around">
+      {/* Alsó vezérlősáv */}
+      <footer className="w-full max-w-xl bg-neutral-900/80 backdrop-blur-lg border border-neutral-800 rounded-3xl p-4 flex items-center justify-between shadow-2xl">
         <button
           onClick={handlePlayToggle}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold transition shadow-lg shadow-amber-500/20"
+          className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black tracking-wide transition shadow-lg shadow-amber-500/20"
         >
-          {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 fill-current" />}
-          <span>{isPlaying ? "Szünet" : "Lejátszás"}</span>
+          {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+          <span>{isPlaying ? "Szünet" : "Zene indítása"}</span>
         </button>
 
         <button
           onClick={handleFlip}
-          className="px-5 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold border border-neutral-700 transition"
+          className="px-6 py-3 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold border border-neutral-700 transition"
         >
           {isFlipped ? "Elrejtés" : "Felfedés (Space)"}
         </button>
 
         <button
           onClick={handleNextTrack}
-          className="p-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition"
-          title="Következő zene"
+          className="p-3 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition"
+          title="Következő szám"
         >
           <SkipForward className="w-5 h-5" />
         </button>
