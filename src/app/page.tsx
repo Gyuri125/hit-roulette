@@ -2,64 +2,109 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import tracksData from "../data/tracks.json";
-import { MusicCard } from "../components/MusicCard";
+import { MusicCard, GuessTarget } from "../components/MusicCard";
 import { RouletteWheel, Category } from "../components/RouletteWheel";
 import { PlayerBoard, PlayerData, createEmptyGrid, checkBingo } from "../components/PlayerBoard";
 import { Track } from "../types/track";
 import { supabase } from "../lib/supabase";
-import { Play, Pause, SkipForward, Timer, Sparkles, LayoutGrid, Disc, Eye, QrCode, Smartphone, X, Users } from "lucide-react";
+import { Play, Pause, SkipForward, Timer, Sparkles, LayoutGrid, Disc, Eye, QrCode, Smartphone, X, Users, Globe, Music2 } from "lucide-react";
 import confetti from "canvas-confetti";
 
+const TIME_OPTIONS = [15, 30, 45, 60];
+type MusicFilter = "all" | "hungarian" | "international";
+
 export default function Home() {
-  const tracks: Track[] = tracksData;
+  const allTracks: Track[] = tracksData;
+
+  // KÜLÖN ZENEI SZŰRŐ (Magyar / Nemzetközi / Vegyes)
+  const [musicFilter, setMusicFilter] = useState<MusicFilter>("all");
+
+  const filteredTracks = React.useMemo(() => {
+    if (musicFilter === "hungarian") {
+      return allTracks.filter(
+        (t) =>
+          (t as any).language === "hu" ||
+          (t as any).genre?.toLowerCase().includes("magyar") ||
+          /hung|neoton|tnt|omega|bikini|republic|charlie|halott|valmar|edda/i.test(t.artist + t.title)
+      );
+    }
+    if (musicFilter === "international") {
+      return allTracks.filter(
+        (t) =>
+          (t as any).language !== "hu" &&
+          !(t as any).genre?.toLowerCase().includes("magyar") &&
+          !/hung|neoton|tnt|omega|bikini|republic|charlie|halott|valmar|edda/i.test(t.artist + t.title)
+      );
+    }
+    return allTracks;
+  }, [allTracks, musicFilter]);
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [autoPlayCountdown, setAutoPlayCountdown] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"boards" | "game">("boards");
-  const [timeLeft, setTimeLeft] = useState<number>(30);
+  
+  // Állítható időtartam
+  const [selectedDuration, setSelectedDuration] = useState<number>(45);
+  const [timeLeft, setTimeLeft] = useState<number>(45);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // TV OLDALI JÁTÉKOSOK LISTÁJA (Ide csatlakoznak a telefonok!)
+  // Kártya célkiemelés (A kerék automatikusan átállítja!)
+  const [guessTarget, setGuessTarget] = useState<GuessTarget>("year");
+
+  // Játékosok listája
   const [players, setPlayers] = useState<PlayerData[]>([
     { id: "host", name: "Házigazda", notes: "", grid: createEmptyGrid(), hasWon: false },
   ]);
   const [activePlayerIdx, setActivePlayerIdx] = useState(0);
 
-  // MULTIPLAYER ÁLLAPOTOK
+  // Multiplayer
   const [roomCode, setRoomCode] = useState<string>("");
   const [isHostModalOpen, setIsHostModalOpen] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [isJoinedAsClient, setIsJoinedAsClient] = useState(false);
-  
-  // Mobil oldali állapotok
   const [clientGrid, setClientGrid] = useState<boolean[][]>(createEmptyGrid());
   const [clientNotes, setClientNotes] = useState<string>("");
 
-  const currentTrack = tracks[currentIndex];
+  const currentTrack = filteredTracks[currentIndex] || allTracks[0];
 
-  // URL-ből szobakód felismerése (?room=KOD)
+  // Mobil cache visszatöltése
   useEffect(() => {
     if (typeof window !== "undefined") {
+      const savedName = localStorage.getItem("hit_player_name");
+      const savedRoom = localStorage.getItem("hit_room_code");
+      const savedGrid = localStorage.getItem("hit_player_grid");
+      const savedNotes = localStorage.getItem("hit_player_notes");
+
       const params = new URLSearchParams(window.location.search);
       const urlRoom = params.get("room");
+
       if (urlRoom) {
         setRoomCode(urlRoom.toUpperCase());
+        if (savedName) setPlayerName(savedName);
         setIsJoinModalOpen(true);
+      } else if (savedRoom && savedName) {
+        setRoomCode(savedRoom);
+        setPlayerName(savedName);
+        if (savedGrid) {
+          try { setClientGrid(JSON.parse(savedGrid)); } catch (_) {}
+        }
+        if (savedNotes) setClientNotes(savedNotes);
+        setIsJoinedAsClient(true);
       }
     }
   }, []);
 
-  // Szoba generálása
   const handleCreateRoom = () => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setRoomCode(code);
     setIsHostModalOpen(true);
   };
 
-  // REALTIME CSATORNA (TV ÉS MOBIL SZINKRON)
+  // Realtime Supabase Broadcast
   useEffect(() => {
     if (!roomCode) return;
 
@@ -67,13 +112,10 @@ export default function Home() {
       config: { broadcast: { self: false } },
     });
 
-    // AMIKOR EGY TELEFON ÜZENETET KÜLD A TV-NEK (Csatlakozás, kattintás vagy jegyzet)
     channel.on("broadcast", { event: "player_sync" }, ({ payload }) => {
       setPlayers((prev) => {
         const existingIdx = prev.findIndex((p) => p.name.toLowerCase() === payload.name.toLowerCase());
-        
         if (existingIdx !== -1) {
-          // Frissítjük a meglévő játékos tábláját és jegyzeteit
           const updated = [...prev];
           updated[existingIdx] = {
             ...updated[existingIdx],
@@ -84,105 +126,78 @@ export default function Home() {
           };
           return updated;
         } else {
-          // ÚJ JÁTÉKOS LÉPETT BE MOBILRÓL -> Automatikusan hozzáadjuk a TV-hez!
-          const newPlayer: PlayerData = {
-            id: payload.id || String(Date.now()),
-            name: payload.name,
-            notes: payload.notes || "",
-            grid: payload.grid || createEmptyGrid(),
-            hasWon: payload.hasWon || false,
-            isOnline: true,
-          };
-
-          confetti({
-            particleCount: 50,
-            spread: 50,
-            origin: { y: 0.2 },
-          });
-
-          return [...prev, newPlayer];
+          return [
+            ...prev,
+            {
+              id: payload.id || String(Date.now()),
+              name: payload.name,
+              notes: payload.notes || "",
+              grid: payload.grid || createEmptyGrid(),
+              hasWon: payload.hasWon || false,
+              isOnline: true,
+            },
+          ];
         }
       });
     });
 
     channel.subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
   }, [roomCode]);
 
-  // MOBIL: Mező megnyomása
   const handleClientTileClick = (r: number, c: number) => {
     const newGrid = clientGrid.map((row, rIdx) =>
       row.map((cell, cIdx) => (rIdx === r && cIdx === c ? !cell : cell))
     );
     setClientGrid(newGrid);
+    localStorage.setItem("hit_player_grid", JSON.stringify(newGrid));
 
     const hasWon = checkBingo(newGrid);
-    if (hasWon) {
-      confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
-    }
+    if (hasWon) confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
 
     if (roomCode) {
       const channel = supabase.channel(`room_${roomCode}`);
       channel.send({
         type: "broadcast",
         event: "player_sync",
-        payload: {
-          id: playerName,
-          name: playerName,
-          grid: newGrid,
-          notes: clientNotes,
-          hasWon,
-        },
+        payload: { id: playerName, name: playerName, grid: newGrid, notes: clientNotes, hasWon },
       });
     }
   };
 
-  // MOBIL: Jegyzet írása
   const handleClientNotesChange = (notes: string) => {
     setClientNotes(notes);
+    localStorage.setItem("hit_player_notes", notes);
+
     if (roomCode) {
       const channel = supabase.channel(`room_${roomCode}`);
       channel.send({
         type: "broadcast",
         event: "player_sync",
-        payload: {
-          id: playerName,
-          name: playerName,
-          grid: clientGrid,
-          notes,
-          hasWon: checkBingo(clientGrid),
-        },
+        payload: { id: playerName, name: playerName, grid: clientGrid, notes, hasWon: checkBingo(clientGrid) },
       });
     }
   };
 
-  // MOBIL: Belépés a szobába
   const handleJoinGame = () => {
     if (!playerName.trim()) return alert("Kérlek írd be a neved!");
+    localStorage.setItem("hit_player_name", playerName);
+    localStorage.setItem("hit_room_code", roomCode);
     setIsJoinModalOpen(false);
     setIsJoinedAsClient(true);
 
-    // Azonnal beküldjük az adatait a TV-nek
     if (roomCode) {
       const channel = supabase.channel(`room_${roomCode}`);
       channel.send({
         type: "broadcast",
         event: "player_sync",
-        payload: {
-          id: playerName,
-          name: playerName,
-          grid: clientGrid,
-          notes: clientNotes,
-          hasWon: false,
-        },
+        payload: { id: playerName, name: playerName, grid: clientGrid, notes: clientNotes, hasWon: false },
       });
     }
   };
 
-  // Zenelejátszás időzítő
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlaying && timeLeft > 0) {
@@ -199,7 +214,18 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isPlaying, timeLeft]);
 
-  // Automata zeneindítás rulett után
+  const handleDurationChange = (seconds: number) => {
+    setSelectedDuration(seconds);
+    if (!isPlaying) setTimeLeft(seconds);
+  };
+
+  // KERÉK MEGÁLLÁSA: Automatikusan átállítja a kártya kiemelési célját is!
+  const handleSpinEnd = (cat: Category) => {
+    setActiveCategory(cat);
+    setGuessTarget(cat.targetType);
+    setAutoPlayCountdown(3);
+  };
+
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (autoPlayCountdown !== null && autoPlayCountdown > 0) {
@@ -212,12 +238,12 @@ export default function Home() {
         audioRef.current.currentTime = 0;
         audioRef.current.play();
         setIsPlaying(true);
-        setTimeLeft(30);
+        setTimeLeft(selectedDuration);
       }
       setActiveTab("boards");
     }
     return () => clearTimeout(timer);
-  }, [autoPlayCountdown]);
+  }, [autoPlayCountdown, selectedDuration]);
 
   const handleFlipAndShow = () => {
     if (activeTab !== "game") setActiveTab("game");
@@ -248,31 +274,26 @@ export default function Home() {
     setIsFlipped(false);
     handleStop();
     setAutoPlayCountdown(null);
-    setTimeLeft(30);
-    setCurrentIndex((prev) => (prev + 1) % tracks.length);
+    setTimeLeft(selectedDuration);
+    setCurrentIndex((prev) => (prev + 1) % filteredTracks.length);
     if (audioRef.current) audioRef.current.currentTime = 0;
   };
 
-  // Cím generálása a QR-kódhoz (automatikusan a tényleges domaint használja)
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://hit-roulette-party.vercel.app";
   const joinUrl = `${baseUrl}?room=${roomCode}`;
   const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
     joinUrl
   )}&bgcolor=171717&color=fbbf24`;
 
-  // Online játékosok száma
   const onlinePlayers = players.filter((p) => p.isOnline);
 
-  // ----------------------------------------------------
-  // MOBILOS NÉZET (BEÉPÍTETT FEHÉRTÁBLÁVAL ÉS JEGYZETEKKEL)
-  // ----------------------------------------------------
+  // ==================== MOBIL NÉZET ====================
   if (isJoinedAsClient) {
     const tileColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
     const clientScore = clientGrid.flat().filter(Boolean).length;
 
     return (
       <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-4 select-none">
-        {/* Mobil fejléc */}
         <header className="w-full flex justify-between items-center py-2 border-b border-neutral-800">
           <div>
             <div className="flex items-center gap-1.5">
@@ -282,16 +303,17 @@ export default function Home() {
             <p className="text-[10px] text-neutral-500 font-mono">SZOBASZÁM: {roomCode} • PONT: {clientScore}/25</p>
           </div>
           <button
-            onClick={() => setIsJoinedAsClient(false)}
-            className="text-xs text-neutral-500 hover:text-rose-400 px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800"
+            onClick={() => {
+              localStorage.clear();
+              setIsJoinedAsClient(false);
+            }}
+            className="text-xs text-neutral-500 hover:text-rose-400 px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-800"
           >
             Kilépés
           </button>
         </header>
 
-        {/* Mobil játéktér */}
         <div className="w-full max-w-xs flex flex-col gap-3 my-auto">
-          {/* 5x5 Rács */}
           <div className="bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-3 shadow-2xl">
             <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800">
               {clientGrid.map((row, r) =>
@@ -309,7 +331,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* MOBIL FEHÉRTÁBLÁS JEGYZET MEZŐ */}
           <div className="w-full bg-neutral-100 rounded-2xl p-3 shadow-inner border border-neutral-300 flex flex-col">
             <span className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider mb-1">
               Fehértábla (Tippjeid a TV-re szinkronizálva):
@@ -326,15 +347,13 @@ export default function Home() {
 
         <footer className="text-center text-[10px] text-neutral-500 pb-1 flex items-center gap-1.5 justify-center">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          <span>Élő kapcsolat a TV-vel • Hit-Roulette</span>
+          <span>Élő szinkron aktív • Hit-Roulette</span>
         </footer>
       </main>
     );
   }
 
-  // ----------------------------------------------------
-  // TV / LAPTOP FŐOLDAL
-  // ----------------------------------------------------
+  // ==================== TV / LAPTOP FŐOLDAL ====================
   return (
     <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-3 sm:p-6 select-none">
       {/* FEJLÉC */}
@@ -346,7 +365,7 @@ export default function Home() {
           <p className="text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
         </div>
 
-        {/* NÉZETVÁLTÓ ÉS MULTIPLAYER GOMBOK */}
+        {/* NÉZETVÁLTÓ ÉS MULTIPLAYER */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 bg-neutral-900 p-1 rounded-2xl border border-neutral-800">
             <button
@@ -370,13 +389,12 @@ export default function Home() {
             </button>
           </div>
 
-          {/* MULTIPLAYER SZOBAGOMB + ONLINE SZÁMLÁLÓ */}
           <button
             onClick={handleCreateRoom}
             className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-violet-600 to-rose-600 text-white text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition"
           >
             <QrCode className="w-3.5 h-3.5 text-amber-300" />
-            <span>{roomCode ? `Szoba: ${roomCode}` : "📱 Mobil Csatlakozás (TV)"}</span>
+            <span>{roomCode ? `Szoba: ${roomCode}` : "📱 Mobil (TV)"}</span>
             {onlinePlayers.length > 0 && (
               <span className="flex items-center gap-1 bg-emerald-500/30 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/50">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -386,24 +404,76 @@ export default function Home() {
           </button>
         </div>
 
-        {/* IDŐZÍTŐ */}
+        {/* IDŐZÍTŐ ÉS SZÁMLÁLÓ */}
         <div className="flex items-center gap-3 text-xs font-mono">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400">
-            <Timer className="w-3.5 h-3.5 text-amber-400" />
-            <span>{timeLeft}s</span>
+          <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-xl border border-neutral-800">
+            <Timer className="w-3.5 h-3.5 text-amber-400 ml-1.5 mr-0.5" />
+            {TIME_OPTIONS.map((sec) => (
+              <button
+                key={sec}
+                onClick={() => handleDurationChange(sec)}
+                className={`px-2 py-0.5 rounded-lg font-bold transition text-[11px] ${
+                  selectedDuration === sec
+                    ? "bg-amber-500 text-neutral-950 shadow"
+                    : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                {sec}s
+              </button>
+            ))}
           </div>
-          <span className="text-neutral-500">#{currentTrack.id} ({currentIndex + 1}/{tracks.length})</span>
+          <span className="text-amber-400 font-bold px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800">
+            {timeLeft}s
+          </span>
         </div>
       </header>
 
-      {/* Audio Lejátszó */}
+      {/* ZENEI SZŰRŐ SÁV (MAGYAR / NEMZETKÖZI / VEGYES) */}
+      <div className="w-full max-w-6xl flex justify-between items-center py-2 px-1 text-xs">
+        <div className="flex items-center gap-1.5 bg-neutral-900/60 p-1 rounded-xl border border-neutral-800/80">
+          <Music2 className="w-3.5 h-3.5 text-amber-400 ml-1.5" />
+          <span className="text-[10px] uppercase font-bold text-neutral-500 px-1">Zenei Csomag:</span>
+          
+          <button
+            onClick={() => setMusicFilter("all")}
+            className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
+              musicFilter === "all" ? "bg-amber-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            🎲 Vegyes
+          </button>
+          
+          <button
+            onClick={() => setMusicFilter("hungarian")}
+            className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
+              musicFilter === "hungarian" ? "bg-emerald-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            🇭🇺 Magyar Zenék
+          </button>
+
+          <button
+            onClick={() => setMusicFilter("international")}
+            className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
+              musicFilter === "international" ? "bg-cyan-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            🌍 Nemzetközi
+          </button>
+        </div>
+
+        <span className="text-[11px] text-neutral-500 font-mono">
+          Dalok a listában: {filteredTracks.length} db
+        </span>
+      </div>
+
       <audio ref={audioRef} src={currentTrack.audioUrl} onEnded={() => setIsPlaying(false)} />
 
-      {/* ÉRTESÍTÉSEK */}
+      {/* Értesítések */}
       {autoPlayCountdown !== null && (
         <div className="fixed top-20 z-50 flex items-center gap-3 px-6 py-2.5 rounded-full bg-amber-500 text-neutral-950 font-black shadow-2xl animate-bounce">
           <Sparkles className="w-5 h-5 fill-current" />
-          <span>Téma rögzítve! Zene indul: {autoPlayCountdown} mp...</span>
+          <span>Feladvány rögzítve! Zene indul: {autoPlayCountdown} mp...</span>
         </div>
       )}
 
@@ -425,13 +495,38 @@ export default function Home() {
             isPlayingMusic={isPlaying}
           />
         ) : (
-          <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center justify-items-center">
-            <div className="flex flex-col items-center justify-center p-6 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full max-w-md shadow-2xl">
-              <RouletteWheel onSpinEnd={(cat) => { setActiveCategory(cat); setAutoPlayCountdown(3); }} />
-            </div>
+          <div className="w-full max-w-5xl flex flex-col items-center gap-6">
+            {/* AKTÍV FELADVÁNY SÁV A KÁRTYA FELETT */}
+            {activeCategory && (
+              <div
+                className="flex items-center gap-2.5 px-5 py-2 rounded-2xl border backdrop-blur-md shadow-lg"
+                style={{
+                  backgroundColor: `${activeCategory.accent}15`,
+                  borderColor: activeCategory.accent,
+                }}
+              >
+                <Sparkles className="w-4 h-4" style={{ color: activeCategory.accent }} />
+                <span className="text-xs font-bold text-neutral-300">Aktív szabály:</span>
+                <span className="text-xs font-black uppercase tracking-wide" style={{ color: activeCategory.accent }}>
+                  {activeCategory.label}
+                </span>
+                <span className="text-[11px] text-neutral-400 font-mono">({activeCategory.desc})</span>
+              </div>
+            )}
 
-            <div className="flex flex-col items-center justify-center w-full max-w-sm">
-              <MusicCard track={currentTrack} isFlipped={isFlipped} onFlip={handleFlipAndShow} />
+            <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-center justify-items-center">
+              <div className="flex flex-col items-center justify-center p-6 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full max-w-md shadow-2xl">
+                <RouletteWheel onSpinEnd={handleSpinEnd} />
+              </div>
+
+              <div className="flex flex-col items-center justify-center w-full max-w-sm">
+                <MusicCard
+                  track={currentTrack}
+                  isFlipped={isFlipped}
+                  onFlip={handleFlipAndShow}
+                  highlight={guessTarget}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -464,7 +559,7 @@ export default function Home() {
         </button>
       </footer>
 
-      {/* TV QR KÓD MODAL (TV / LAPTOP) */}
+      {/* TV QR KÓD MODAL */}
       {isHostModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
           <div className="w-full max-w-sm bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-4 text-center">
@@ -488,7 +583,6 @@ export default function Home() {
               <img src={qrCodeImageUrl} alt="Room QR Code" className="w-48 h-48 rounded-lg" />
             </div>
 
-            {/* ONLINE JÁTÉKOSOK LISTÁJA A MODALBAN */}
             <div className="w-full bg-neutral-950 p-2.5 rounded-xl border border-neutral-800 flex flex-col gap-1">
               <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider flex items-center justify-center gap-1">
                 <Users className="w-3 h-3 text-cyan-400" /> Csatlakozott játékosok ({onlinePlayers.length}):
