@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X } from "lucide-react";
+import React from "react";
+import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone } from "lucide-react";
 import confetti from "canvas-confetti";
 
 const TILE_COLORS = [
@@ -18,24 +18,21 @@ export interface PlayerData {
   notes: string;
   grid: boolean[][];
   hasWon: boolean;
+  isOnline?: boolean;
 }
 
-const createEmptyGrid = () =>
+export const createEmptyGrid = () =>
   Array(5)
     .fill(null)
     .map(() => Array(5).fill(false));
 
-// Hitster Bingo ellenőrzése: Sor, Oszlop vagy Átló teljesülése
-const checkBingo = (grid: boolean[][]): boolean => {
-  // Sorok ellenőrzése
+export const checkBingo = (grid: boolean[][]): boolean => {
   for (let r = 0; r < 5; r++) {
     if (grid[r].every(Boolean)) return true;
   }
-  // Oszlopok ellenőrzése
   for (let c = 0; c < 5; c++) {
     if ([0, 1, 2, 3, 4].every((r) => grid[r][c])) return true;
   }
-  // Átlók ellenőrzése
   if ([0, 1, 2, 3, 4].every((i) => grid[i][i])) return true;
   if ([0, 1, 2, 3, 4].every((i) => grid[i][4 - i])) return true;
 
@@ -43,21 +40,23 @@ const checkBingo = (grid: boolean[][]): boolean => {
 };
 
 interface PlayerBoardProps {
+  players: PlayerData[];
+  setPlayers: React.Dispatch<React.SetStateAction<PlayerData[]>>;
+  activePlayerIdx: number;
+  setActivePlayerIdx: (idx: number) => void;
   onStartSpinAndMusic?: () => void;
   isPlayingMusic?: boolean;
 }
 
 export const PlayerBoard: React.FC<PlayerBoardProps> = ({
+  players,
+  setPlayers,
+  activePlayerIdx,
+  setActivePlayerIdx,
   onStartSpinAndMusic,
   isPlayingMusic,
 }) => {
-  const [players, setPlayers] = useState<PlayerData[]>([
-    { id: "1", name: "Peti", notes: "2010's", grid: createEmptyGrid(), hasWon: false },
-    { id: "2", name: "Evelin", notes: "Rock", grid: createEmptyGrid(), hasWon: false },
-    { id: "3", name: "Gyuri", notes: "", grid: createEmptyGrid(), hasWon: false },
-  ]);
-  const [activePlayerIdx, setActivePlayerIdx] = useState(0);
-  const [winnerAlert, setWinnerAlert] = useState<string | null>(null);
+  const [winnerAlert, setWinnerAlert] = React.useState<string | null>(null);
 
   const currentPlayer = players[activePlayerIdx] || players[0];
 
@@ -72,7 +71,6 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
 
         const won = checkBingo(newGrid);
 
-        // Ha most nyert először (friss Bingo)
         if (won && !player.hasWon) {
           setWinnerAlert(player.name);
           confetti({
@@ -101,7 +99,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   };
 
   const addPlayer = () => {
-    if (players.length >= 8) return;
+    if (players.length >= 10) return;
     const newIdx = players.length + 1;
     const newPlayer: PlayerData = {
       id: String(Date.now()),
@@ -130,11 +128,13 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     );
   };
 
-  const score = currentPlayer.grid.flat().filter(Boolean).length;
+  const score = currentPlayer ? currentPlayer.grid.flat().filter(Boolean).length : 0;
+
+  if (!currentPlayer) return null;
 
   return (
     <div className="w-full max-w-xl flex flex-col items-center gap-5 px-2">
-      {/* GYŐZELMI ÉRTESÍTŐ MODAL (NEM ZÁRJA LE A JÁTÉKOT, BÁRMIKOR ELTÜNTETHETŐ) */}
+      {/* GYŐZELMI ÉRTESÍTŐ */}
       {winnerAlert && (
         <div className="w-full bg-gradient-to-r from-amber-500/20 via-rose-500/20 to-violet-500/20 border-2 border-amber-400 p-4 rounded-2xl flex items-center justify-between shadow-2xl backdrop-blur-md animate-bounce">
           <div className="flex items-center gap-3">
@@ -157,7 +157,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
         </div>
       )}
 
-      {/* GYORS PÖRGETÉS GOMB KÖZVETLENÜL A TÁBLÁBÓL */}
+      {/* GYORS PÖRGETÉS GOMB A TÁBLÁBÓL */}
       {onStartSpinAndMusic && (
         <button
           onClick={onStartSpinAndMusic}
@@ -180,35 +180,38 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                 : "bg-neutral-900 text-neutral-400 border-neutral-800 hover:text-white"
             }`}
           >
-            <Users className="w-3.5 h-3.5" />
+            {p.isOnline ? <Smartphone className="w-3.5 h-3.5 text-cyan-400" /> : <Users className="w-3.5 h-3.5" />}
             <span>{p.name}</span>
             {p.hasWon && <Trophy className="w-3 h-3 text-neutral-950" />}
           </button>
         ))}
 
-        {players.length < 8 && (
+        {players.length < 10 && (
           <button
             onClick={addPlayer}
             className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-neutral-400 hover:text-white transition"
-            title="Új játékos"
+            title="Helyi játékos hozzáadása"
           >
             <Plus className="w-4 h-4" />
           </button>
         )}
       </div>
 
-      {/* A FIZIKAI HITSTER TÁBLA DÍZÁJNJA */}
+      {/* A HITSTER TÁBLA DÍZÁJNJA */}
       <div className="relative w-full max-w-sm rounded-[32px] bg-neutral-900 border-4 border-neutral-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-4 sm:p-5 flex flex-col items-center gap-4">
         
         {/* Névadás és pontszám */}
         <div className="w-full flex justify-between items-center px-1">
-          <input
-            type="text"
-            value={currentPlayer.name}
-            onChange={(e) => updatePlayerName(e.target.value)}
-            className="bg-transparent text-base font-black uppercase tracking-wider text-amber-400 focus:outline-none border-b border-dashed border-neutral-700 focus:border-amber-400 w-44"
-            placeholder="Játékos neve"
-          />
+          <div className="flex items-center gap-1.5">
+            {currentPlayer.isOnline && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Mobilról csatlakozva" />}
+            <input
+              type="text"
+              value={currentPlayer.name}
+              onChange={(e) => updatePlayerName(e.target.value)}
+              className="bg-transparent text-base font-black uppercase tracking-wider text-amber-400 focus:outline-none border-b border-dashed border-neutral-700 focus:border-amber-400 w-40"
+              placeholder="Játékos neve"
+            />
+          </div>
 
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full bg-neutral-950 border border-neutral-800 text-neutral-300">
@@ -218,7 +221,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
               <button
                 onClick={() => removePlayer(activePlayerIdx)}
                 className="text-neutral-600 hover:text-rose-400 transition"
-                title="Játékos törlése"
+                title="Törlés"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -226,7 +229,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           </div>
         </div>
 
-        {/* 5x5 SZÍNES HITSTER BINGO RÁCS */}
+        {/* 5x5 RÁCS */}
         <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800/80">
           {currentPlayer.grid.map((row, r) =>
             row.map((isMarked, c) => {
@@ -250,10 +253,10 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
         </div>
 
         <div className="text-[10px] font-black tracking-widest text-neutral-500 uppercase">
-          HITSTER BINGO {currentPlayer.hasWon && "• NYERTES TÁBLA"}
+          HITSTER BINGO {currentPlayer.isOnline ? "• TELEFONRÓL VEZÉRELVE" : ""}
         </div>
 
-        {/* FEHÉRTÁBLÁS JEGYZET MEZŐ */}
+        {/* FEHÉRTÁBLA */}
         <div className="w-full bg-neutral-100 rounded-xl p-2.5 shadow-inner border border-neutral-300 flex flex-col">
           <span className="text-[9px] uppercase font-bold text-neutral-500 tracking-wider">
             Fehértábla (Tippek, évek):
@@ -267,9 +270,9 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           />
         </div>
 
-        {/* Törlés gomb */}
+        {/* Alsó kezelősáv */}
         <div className="w-full flex justify-between items-center text-[10px] text-neutral-500 px-1">
-          <span>Kattints a négyzetekre az X-eléshez</span>
+          <span>Kattints az X-eléshez</span>
           <button
             onClick={resetCurrentGrid}
             className="hover:text-rose-400 flex items-center gap-1 transition"

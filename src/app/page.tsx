@@ -4,10 +4,10 @@ import React, { useState, useEffect, useRef } from "react";
 import tracksData from "../data/tracks.json";
 import { MusicCard } from "../components/MusicCard";
 import { RouletteWheel, Category } from "../components/RouletteWheel";
-import { PlayerBoard } from "../components/PlayerBoard";
+import { PlayerBoard, PlayerData, createEmptyGrid, checkBingo } from "../components/PlayerBoard";
 import { Track } from "../types/track";
 import { supabase } from "../lib/supabase";
-import { Play, Pause, SkipForward, Timer, Sparkles, LayoutGrid, Disc, Eye, QrCode, Smartphone, X, Trophy } from "lucide-react";
+import { Play, Pause, SkipForward, Timer, Sparkles, LayoutGrid, Disc, Eye, QrCode, Smartphone, X, Users } from "lucide-react";
 import confetti from "canvas-confetti";
 
 export default function Home() {
@@ -16,12 +16,16 @@ export default function Home() {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
-  
-  // Automatikus zeneindítás (3 mp)
   const [autoPlayCountdown, setAutoPlayCountdown] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"boards" | "game">("boards");
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // TV OLDALI JÁTÉKOSOK LISTÁJA (Ide csatlakoznak a telefonok!)
+  const [players, setPlayers] = useState<PlayerData[]>([
+    { id: "host", name: "Házigazda", notes: "", grid: createEmptyGrid(), hasWon: false },
+  ]);
+  const [activePlayerIdx, setActivePlayerIdx] = useState(0);
 
   // MULTIPLAYER ÁLLAPOTOK
   const [roomCode, setRoomCode] = useState<string>("");
@@ -29,13 +33,14 @@ export default function Home() {
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [isJoinedAsClient, setIsJoinedAsClient] = useState(false);
-  const [clientGrid, setClientGrid] = useState<boolean[][]>(
-    Array(5).fill(null).map(() => Array(5).fill(false))
-  );
+  
+  // Mobil oldali állapotok
+  const [clientGrid, setClientGrid] = useState<boolean[][]>(createEmptyGrid());
+  const [clientNotes, setClientNotes] = useState<string>("");
 
   const currentTrack = tracks[currentIndex];
 
-  // URL-ből szobakód automatikus felismerése (?room=KOD)
+  // URL-ből szobakód felismerése (?room=KOD)
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -47,14 +52,14 @@ export default function Home() {
     }
   }, []);
 
-  // Szoba generálása a TV / Házigazda számára
+  // Szoba generálása
   const handleCreateRoom = () => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setRoomCode(code);
     setIsHostModalOpen(true);
   };
 
-  // REALTIME CSATLAKOZÁS ÉS SZINKRONIZÁCIÓ (Supabase Broadcast)
+  // REALTIME CSATORNA (TV ÉS MOBIL SZINKRON)
   useEffect(() => {
     if (!roomCode) return;
 
@@ -62,15 +67,42 @@ export default function Home() {
       config: { broadcast: { self: false } },
     });
 
-    // Ha a TV nézetben vagyunk: fogadjuk a telefonos kattintásokat
-    channel.on("broadcast", { event: "tile_update" }, ({ payload }) => {
-      if (payload.hasWon) {
-        confetti({
-          particleCount: 100,
-          spread: 80,
-          origin: { y: 0.5 },
-        });
-      }
+    // AMIKOR EGY TELEFON ÜZENETET KÜLD A TV-NEK (Csatlakozás, kattintás vagy jegyzet)
+    channel.on("broadcast", { event: "player_sync" }, ({ payload }) => {
+      setPlayers((prev) => {
+        const existingIdx = prev.findIndex((p) => p.name.toLowerCase() === payload.name.toLowerCase());
+        
+        if (existingIdx !== -1) {
+          // Frissítjük a meglévő játékos tábláját és jegyzeteit
+          const updated = [...prev];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            grid: payload.grid,
+            notes: payload.notes,
+            hasWon: payload.hasWon,
+            isOnline: true,
+          };
+          return updated;
+        } else {
+          // ÚJ JÁTÉKOS LÉPETT BE MOBILRÓL -> Automatikusan hozzáadjuk a TV-hez!
+          const newPlayer: PlayerData = {
+            id: payload.id || String(Date.now()),
+            name: payload.name,
+            notes: payload.notes || "",
+            grid: payload.grid || createEmptyGrid(),
+            hasWon: payload.hasWon || false,
+            isOnline: true,
+          };
+
+          confetti({
+            particleCount: 50,
+            spread: 50,
+            origin: { y: 0.2 },
+          });
+
+          return [...prev, newPlayer];
+        }
+      });
     });
 
     channel.subscribe();
@@ -80,35 +112,77 @@ export default function Home() {
     };
   }, [roomCode]);
 
-  // Telefonos mező megnyomása -> azonnali üzenetküldés a TV-nek
+  // MOBIL: Mező megnyomása
   const handleClientTileClick = (r: number, c: number) => {
     const newGrid = clientGrid.map((row, rIdx) =>
       row.map((cell, cIdx) => (rIdx === r && cIdx === c ? !cell : cell))
     );
     setClientGrid(newGrid);
 
-    // Sor/oszlop/átló Bingo ellenőrzés
-    const isRowWon = newGrid.some((row) => row.every(Boolean));
-    const isColWon = [0, 1, 2, 3, 4].some((col) => [0, 1, 2, 3, 4].every((row) => newGrid[row][col]));
-    const hasWon = isRowWon || isColWon;
+    const hasWon = checkBingo(newGrid);
+    if (hasWon) {
+      confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
+    }
 
-    // Supabase Broadcast küldése a TV-nek
     if (roomCode) {
       const channel = supabase.channel(`room_${roomCode}`);
       channel.send({
         type: "broadcast",
-        event: "tile_update",
+        event: "player_sync",
         payload: {
-          playerName: playerName || "Játékos",
-          row: r,
-          col: c,
+          id: playerName,
+          name: playerName,
+          grid: newGrid,
+          notes: clientNotes,
           hasWon,
         },
       });
     }
   };
 
-  // Zenelejátszó visszaszámláló
+  // MOBIL: Jegyzet írása
+  const handleClientNotesChange = (notes: string) => {
+    setClientNotes(notes);
+    if (roomCode) {
+      const channel = supabase.channel(`room_${roomCode}`);
+      channel.send({
+        type: "broadcast",
+        event: "player_sync",
+        payload: {
+          id: playerName,
+          name: playerName,
+          grid: clientGrid,
+          notes,
+          hasWon: checkBingo(clientGrid),
+        },
+      });
+    }
+  };
+
+  // MOBIL: Belépés a szobába
+  const handleJoinGame = () => {
+    if (!playerName.trim()) return alert("Kérlek írd be a neved!");
+    setIsJoinModalOpen(false);
+    setIsJoinedAsClient(true);
+
+    // Azonnal beküldjük az adatait a TV-nek
+    if (roomCode) {
+      const channel = supabase.channel(`room_${roomCode}`);
+      channel.send({
+        type: "broadcast",
+        event: "player_sync",
+        payload: {
+          id: playerName,
+          name: playerName,
+          grid: clientGrid,
+          notes: clientNotes,
+          hasWon: false,
+        },
+      });
+    }
+  };
+
+  // Zenelejátszás időzítő
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlaying && timeLeft > 0) {
@@ -125,7 +199,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isPlaying, timeLeft]);
 
-  // Automata zeneindítás a rulett után
+  // Automata zeneindítás rulett után
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (autoPlayCountdown !== null && autoPlayCountdown > 0) {
@@ -179,63 +253,88 @@ export default function Home() {
     if (audioRef.current) audioRef.current.currentTime = 0;
   };
 
-  // Dinamikus QR kód link generálása a telefonokhoz (HTTPS Vercel domaint ad mobilnak még localhoston is)
-  const baseUrl =
-    typeof window !== "undefined" && !window.location.hostname.includes("localhost")
-      ? window.location.origin
-      : "https://hit-roulette-lie1.vercel.app";
+  // Cím generálása a QR-kódhoz (automatikusan a tényleges domaint használja)
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://hit-roulette-party.vercel.app";
   const joinUrl = `${baseUrl}?room=${roomCode}`;
   const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
     joinUrl
   )}&bgcolor=171717&color=fbbf24`;
 
-  // HA A FELHASZNÁLÓ MINT MOBIL JÁTÉKOS LÉPETT BE
+  // Online játékosok száma
+  const onlinePlayers = players.filter((p) => p.isOnline);
+
+  // ----------------------------------------------------
+  // MOBILOS NÉZET (BEÉPÍTETT FEHÉRTÁBLÁVAL ÉS JEGYZETEKKEL)
+  // ----------------------------------------------------
   if (isJoinedAsClient) {
     const tileColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
+    const clientScore = clientGrid.flat().filter(Boolean).length;
+
     return (
       <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-4 select-none">
-        <header className="w-full flex justify-between items-center py-3 border-b border-neutral-800">
+        {/* Mobil fejléc */}
+        <header className="w-full flex justify-between items-center py-2 border-b border-neutral-800">
           <div>
-            <h1 className="text-base font-black text-amber-400 uppercase tracking-wider">{playerName} táblája</h1>
-            <p className="text-[10px] text-neutral-500 font-mono">SZOBASZÁM: {roomCode}</p>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <h1 className="text-base font-black text-amber-400 uppercase tracking-wider">{playerName} táblája</h1>
+            </div>
+            <p className="text-[10px] text-neutral-500 font-mono">SZOBASZÁM: {roomCode} • PONT: {clientScore}/25</p>
           </div>
           <button
             onClick={() => setIsJoinedAsClient(false)}
-            className="text-xs text-neutral-500 hover:text-rose-400"
+            className="text-xs text-neutral-500 hover:text-rose-400 px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800"
           >
             Kilépés
           </button>
         </header>
 
-        {/* MOBIL 5x5 TÁBLA */}
-        <div className="w-full max-w-xs bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-4 shadow-2xl my-auto flex flex-col gap-3">
-          <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800">
-            {clientGrid.map((row, r) =>
-              row.map((isMarked, c) => (
-                <button
-                  key={`${r}-${c}`}
-                  onClick={() => handleClientTileClick(r, c)}
-                  className="aspect-square rounded-lg flex items-center justify-center font-black text-2xl text-neutral-950 shadow active:scale-90 transition"
-                  style={{ backgroundColor: tileColors[(r + c) % tileColors.length] }}
-                >
-                  {isMarked ? "✕" : ""}
-                </button>
-              ))
-            )}
+        {/* Mobil játéktér */}
+        <div className="w-full max-w-xs flex flex-col gap-3 my-auto">
+          {/* 5x5 Rács */}
+          <div className="bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-3 shadow-2xl">
+            <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800">
+              {clientGrid.map((row, r) =>
+                row.map((isMarked, c) => (
+                  <button
+                    key={`${r}-${c}`}
+                    onClick={() => handleClientTileClick(r, c)}
+                    className="aspect-square rounded-lg flex items-center justify-center font-black text-2xl text-neutral-950 shadow active:scale-90 transition"
+                    style={{ backgroundColor: tileColors[(r + c) % tileColors.length] }}
+                  >
+                    {isMarked ? "✕" : ""}
+                  </button>
+                ))
+              )}
+            </div>
           </div>
-          <div className="text-center text-[10px] text-neutral-500 font-bold uppercase tracking-wider">
-            Érintsd meg a négyzetet a jelöléshez!
+
+          {/* MOBIL FEHÉRTÁBLÁS JEGYZET MEZŐ */}
+          <div className="w-full bg-neutral-100 rounded-2xl p-3 shadow-inner border border-neutral-300 flex flex-col">
+            <span className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider mb-1">
+              Fehértábla (Tippjeid a TV-re szinkronizálva):
+            </span>
+            <textarea
+              value={clientNotes}
+              onChange={(e) => handleClientNotesChange(e.target.value)}
+              placeholder="Írd ide a dalok címeit, éveit..."
+              rows={2}
+              className="w-full bg-transparent text-neutral-900 font-bold text-xs focus:outline-none resize-none font-sans"
+            />
           </div>
         </div>
 
-        <footer className="text-center text-[11px] text-neutral-600 pb-2">
-          Szinkronizálva a TV-vel • Hit-Roulette Party
+        <footer className="text-center text-[10px] text-neutral-500 pb-1 flex items-center gap-1.5 justify-center">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <span>Élő kapcsolat a TV-vel • Hit-Roulette</span>
         </footer>
       </main>
     );
   }
 
-  // ALAPÉRTELMEZETT TV / LAPTOP FŐOLDAL
+  // ----------------------------------------------------
+  // TV / LAPTOP FŐOLDAL
+  // ----------------------------------------------------
   return (
     <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-3 sm:p-6 select-none">
       {/* FEJLÉC */}
@@ -271,13 +370,19 @@ export default function Home() {
             </button>
           </div>
 
-          {/* MULTIPLAYER SZOBAGOMB */}
+          {/* MULTIPLAYER SZOBAGOMB + ONLINE SZÁMLÁLÓ */}
           <button
             onClick={handleCreateRoom}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-violet-600 to-rose-600 text-white text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-violet-600 to-rose-600 text-white text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition"
           >
             <QrCode className="w-3.5 h-3.5 text-amber-300" />
             <span>{roomCode ? `Szoba: ${roomCode}` : "📱 Mobil Csatlakozás (TV)"}</span>
+            {onlinePlayers.length > 0 && (
+              <span className="flex items-center gap-1 bg-emerald-500/30 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/50">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {onlinePlayers.length} online
+              </span>
+            )}
           </button>
         </div>
 
@@ -306,6 +411,10 @@ export default function Home() {
       <div className="w-full flex justify-center items-center my-auto py-4">
         {activeTab === "boards" ? (
           <PlayerBoard
+            players={players}
+            setPlayers={setPlayers}
+            activePlayerIdx={activePlayerIdx}
+            setActivePlayerIdx={setActivePlayerIdx}
             onStartSpinAndMusic={() => {
               setActiveTab("game");
               setIsFlipped(false);
@@ -355,7 +464,7 @@ export default function Home() {
         </button>
       </footer>
 
-      {/* TV QR KÓD MODAL */}
+      {/* TV QR KÓD MODAL (TV / LAPTOP) */}
       {isHostModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
           <div className="w-full max-w-sm bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-4 text-center">
@@ -379,9 +488,23 @@ export default function Home() {
               <img src={qrCodeImageUrl} alt="Room QR Code" className="w-48 h-48 rounded-lg" />
             </div>
 
-            <p className="text-[10px] text-neutral-500 leading-tight">
-              A telefonos játékosok saját táblát kapnak, és minden kattintásuk azonnal szinkronizál ide a képernyőre!
-            </p>
+            {/* ONLINE JÁTÉKOSOK LISTÁJA A MODALBAN */}
+            <div className="w-full bg-neutral-950 p-2.5 rounded-xl border border-neutral-800 flex flex-col gap-1">
+              <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider flex items-center justify-center gap-1">
+                <Users className="w-3 h-3 text-cyan-400" /> Csatlakozott játékosok ({onlinePlayers.length}):
+              </span>
+              {onlinePlayers.length === 0 ? (
+                <span className="text-xs text-neutral-600 italic">Még senki nem csatlakozott...</span>
+              ) : (
+                <div className="flex flex-wrap justify-center gap-1.5 pt-1">
+                  {onlinePlayers.map((p) => (
+                    <span key={p.id} className="text-xs font-bold px-2 py-0.5 rounded-md bg-neutral-900 border border-neutral-700 text-amber-400">
+                      📱 {p.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -398,18 +521,14 @@ export default function Home() {
 
             <input
               type="text"
-              placeholder="Add meg a neved (pl. Béla)"
+              placeholder="Add meg a neved (pl. Sajt)"
               value={playerName}
               onChange={(e) => setPlayerName(e.target.value)}
               className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 text-center font-bold"
             />
 
             <button
-              onClick={() => {
-                if (!playerName.trim()) return alert("Kérlek írd be a neved!");
-                setIsJoinModalOpen(false);
-                setIsJoinedAsClient(true);
-              }}
+              onClick={handleJoinGame}
               className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-sm uppercase tracking-wider transition shadow-lg shadow-amber-500/20"
             >
               Belépés a játékba
