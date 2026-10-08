@@ -1,8 +1,10 @@
 "use client";
 
 import React from "react";
-import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone, Eraser, Sparkles } from "lucide-react";
 import confetti from "canvas-confetti";
+import { Category } from "./RouletteWheel";
 
 const TILE_COLORS = [
   "#f59e0b", // Sárga
@@ -39,6 +41,41 @@ export const checkBingo = (grid: boolean[][]): boolean => {
   return false;
 };
 
+// ================= LOKÁLIS HANGEFFEKT (Web Audio API) =================
+const playMarkerSound = (isMarking: boolean) => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    if (isMarking) {
+      // Filctoll / Nyomda kattanás
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(460, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.05);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.05);
+    } else {
+      // Visszavonó halk kattanás
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(320, ctx.currentTime + 0.04);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.04);
+    }
+  } catch (_) {}
+};
+
 interface PlayerBoardProps {
   players: PlayerData[];
   setPlayers: React.Dispatch<React.SetStateAction<PlayerData[]>>;
@@ -46,6 +83,7 @@ interface PlayerBoardProps {
   setActivePlayerIdx: (idx: number) => void;
   onStartSpinAndMusic?: () => void;
   isPlayingMusic?: boolean;
+  activeCategory?: Category | null;
 }
 
 export const PlayerBoard: React.FC<PlayerBoardProps> = ({
@@ -55,12 +93,25 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   setActivePlayerIdx,
   onStartSpinAndMusic,
   isPlayingMusic,
+  activeCategory,
 }) => {
   const [winnerAlert, setWinnerAlert] = React.useState<string | null>(null);
 
   const currentPlayer = players[activePlayerIdx] || players[0];
 
   const toggleCell = (rIdx: number, cIdx: number) => {
+    const willBeMarked = !currentPlayer.grid[rIdx][cIdx];
+
+    // 1. Hang lejátszása
+    playMarkerSound(willBeMarked);
+
+    // 2. Finom rezgés mobil eszközökön
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate(willBeMarked ? 35 : 15);
+      } catch (_) {}
+    }
+
     setPlayers((prev) =>
       prev.map((player, pIdx) => {
         if (pIdx !== activePlayerIdx) return player;
@@ -98,6 +149,10 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     );
   };
 
+  const clearNotesOnly = () => {
+    updateNotes("");
+  };
+
   const addPlayer = () => {
     if (players.length >= 10) return;
     const newIdx = players.length + 1;
@@ -122,7 +177,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     setPlayers((prev) =>
       prev.map((p, idx) =>
         idx === activePlayerIdx
-          ? { ...p, grid: createEmptyGrid(), hasWon: false, notes: "" }
+          ? { ...p, grid: createEmptyGrid(), hasWon: false }
           : p
       )
     );
@@ -133,7 +188,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   if (!currentPlayer) return null;
 
   return (
-    <div className="w-full max-w-xl flex flex-col items-center gap-5 px-2">
+    <div className="w-full max-w-xl flex flex-col items-center gap-4 px-2">
       {/* GYŐZELMI ÉRTESÍTŐ */}
       {winnerAlert && (
         <div className="w-full bg-gradient-to-r from-amber-500/20 via-rose-500/20 to-violet-500/20 border-2 border-amber-400 p-4 rounded-2xl flex items-center justify-between shadow-2xl backdrop-blur-md animate-bounce">
@@ -198,7 +253,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
       </div>
 
       {/* A HITSTER TÁBLA DÍZÁJNJA */}
-      <div className="relative w-full max-w-sm rounded-[32px] bg-neutral-900 border-4 border-neutral-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-4 sm:p-5 flex flex-col items-center gap-4">
+      <div className="relative w-full max-w-sm rounded-[32px] bg-neutral-900 border-4 border-neutral-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-4 sm:p-5 flex flex-col items-center gap-3.5">
         
         {/* Névadás és pontszám */}
         <div className="w-full flex justify-between items-center px-1">
@@ -221,7 +276,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
               <button
                 onClick={() => removePlayer(activePlayerIdx)}
                 className="text-neutral-600 hover:text-rose-400 transition"
-                title="Törlés"
+                title="Játékos törlése"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -229,7 +284,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           </div>
         </div>
 
-        {/* 5x5 RÁCS */}
+        {/* 5x5 RÁCS MENŐ X ANIMÁCIÓVAL */}
         <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800/80">
           {currentPlayer.grid.map((row, r) =>
             row.map((isMarked, c) => {
@@ -238,14 +293,22 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                 <button
                   key={`${r}-${c}`}
                   onClick={() => toggleCell(r, c)}
-                  className="aspect-square rounded-lg flex items-center justify-center relative transition transform active:scale-90 shadow"
+                  className="aspect-square rounded-xl flex items-center justify-center relative transition transform active:scale-90 shadow select-none overflow-hidden"
                   style={{ backgroundColor: color }}
                 >
-                  {isMarked && (
-                    <span className="text-2xl sm:text-3xl font-black text-neutral-950 select-none">
-                      ✕
-                    </span>
-                  )}
+                  <AnimatePresence>
+                    {isMarked && (
+                      <motion.span
+                        initial={{ scale: 0, rotate: -45, opacity: 0 }}
+                        animate={{ scale: [1.35, 1], rotate: 0, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                        className="text-2xl sm:text-3xl font-black text-neutral-950 select-none drop-shadow-sm pointer-events-none"
+                      >
+                        ✕
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </button>
               );
             })
@@ -256,29 +319,42 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           HITSTER BINGO {currentPlayer.isOnline ? "• TELEFONRÓL VEZÉRELVE" : ""}
         </div>
 
-        {/* FEHÉRTÁBLA */}
-        <div className="w-full bg-neutral-100 rounded-xl p-2.5 shadow-inner border border-neutral-300 flex flex-col">
-          <span className="text-[9px] uppercase font-bold text-neutral-500 tracking-wider">
-            Fehértábla (Tippek, évek):
-          </span>
+        {/* FEHÉRTÁBLA KÜLÖN RADÍR/TÖRLÉS GOMBBAL */}
+        <div className="w-full bg-neutral-100 rounded-2xl p-2.5 shadow-inner border border-neutral-300 flex flex-col">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-[9px] uppercase font-bold text-neutral-500 tracking-wider">
+              Fehértábla (Tippek, évek):
+            </span>
+            {currentPlayer.notes && (
+              <button
+                onClick={clearNotesOnly}
+                className="flex items-center gap-1 text-[10px] font-bold text-neutral-500 hover:text-rose-600 transition px-1 py-0.5 rounded"
+                title="Csak a felírt jegyzetek törlése"
+              >
+                <Eraser className="w-3 h-3 text-rose-500" />
+                <span>Jegyzet törlése</span>
+              </button>
+            )}
+          </div>
           <textarea
             value={currentPlayer.notes}
             onChange={(e) => updateNotes(e.target.value)}
             placeholder="Pl. Queen - 1975, Michael Jackson - 1982..."
             rows={2}
-            className="w-full bg-transparent text-neutral-900 font-semibold text-xs focus:outline-none resize-none"
+            className="w-full bg-transparent text-neutral-900 font-semibold text-xs focus:outline-none resize-none font-sans"
           />
         </div>
 
         {/* Alsó kezelősáv */}
-        <div className="w-full flex justify-between items-center text-[10px] text-neutral-500 px-1">
+        <div className="w-full flex justify-between items-center text-[10px] text-neutral-500 px-1 pt-0.5">
           <span>Kattints az X-eléshez</span>
           <button
             onClick={resetCurrentGrid}
             className="hover:text-rose-400 flex items-center gap-1 transition"
+            title="Csak az X-ek törlése"
           >
             <RotateCcw className="w-3 h-3" />
-            <span>Tábla ürítése</span>
+            <span>Tábla (X-ek) ürítése</span>
           </button>
         </div>
       </div>
