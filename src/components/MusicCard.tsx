@@ -44,6 +44,7 @@ interface MusicCardProps {
   onFlip: () => void;
   highlight?: GuessTarget;
   currentTime?: number;
+  onSeek?: (time: number) => void;
 }
 
 export const MusicCard: React.FC<MusicCardProps> = ({
@@ -52,10 +53,13 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   onFlip,
   highlight = "year",
   currentTime = 0,
+  onSeek,
 }) => {
-  // Dalszöveg láthatósága az előlapon (felfordítás előtt)
   const [showFrontLyrics, setShowFrontLyrics] = useState(true);
 
+  // Zárt belső konténerek és cél-sorok referenciái
+  const frontContainerRef = useRef<HTMLDivElement | null>(null);
+  const backContainerRef = useRef<HTMLDivElement | null>(null);
   const frontLyricsRef = useRef<HTMLParagraphElement | null>(null);
   const backLyricsRef = useRef<HTMLParagraphElement | null>(null);
 
@@ -63,7 +67,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
     return parseLrc(track.lyrics || "");
   }, [track.lyrics]);
 
-  // Aktív sor indexének kiszámítása az audio currentTime alapján
   const activeIndex = useMemo(() => {
     if (!parsedLyrics.length || parsedLyrics[0].time === -1) return -1;
     let idx = -1;
@@ -77,12 +80,15 @@ export const MusicCard: React.FC<MusicCardProps> = ({
     return idx;
   }, [parsedLyrics, currentTime]);
 
-  // Apple Music automatikus finom görgetés a nézet középpontjába
+  // Kizárólag a belső dobozt görgeti simán, a böngésző ablakát soha nem rántja le
   useEffect(() => {
-    if (isFlipped && backLyricsRef.current) {
-      backLyricsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-    } else if (!isFlipped && frontLyricsRef.current && showFrontLyrics) {
-      frontLyricsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    const container = isFlipped ? backContainerRef.current : frontContainerRef.current;
+    const target = isFlipped ? backLyricsRef.current : frontLyricsRef.current;
+
+    if (container && target) {
+      const targetTop = target.offsetTop - container.offsetTop;
+      const centerOffset = targetTop - container.clientHeight / 2 + target.clientHeight / 2;
+      container.scrollTo({ top: centerOffset, behavior: "smooth" });
     }
   }, [activeIndex, isFlipped, showFrontLyrics]);
 
@@ -98,9 +104,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         transition={{ duration: 0.6, ease: [0.23, 1, 0.32, 1] }}
         style={{ transformStyle: "preserve-3d" }}
       >
-        {/* ========================================================================= */}
         {/* ===================== ELŐLAP (TIPPELŐS OLDAL) =========================== */}
-        {/* ========================================================================= */}
         <div
           className="absolute inset-0 w-full h-full rounded-[36px] bg-gradient-to-b from-neutral-900 via-neutral-950 to-neutral-950 border-2 border-neutral-800 p-5 flex flex-col justify-between shadow-[0_25px_60px_rgba(0,0,0,0.85)] backdrop-blur-xl overflow-hidden"
           style={{
@@ -114,11 +118,10 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               Hitster Kártya
             </span>
 
-            {/* DALSZÖVEG REJTÉS / MEGJELENÍTÉS GOMB */}
             {track.lyrics && (
               <button
                 onClick={(e) => {
-                  e.stopPropagation(); // Ne fordítsa meg a kártyát gombnyomásra!
+                  e.stopPropagation();
                   setShowFrontLyrics((prev) => !prev);
                 }}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold transition shadow-sm ${
@@ -137,27 +140,33 @@ export const MusicCard: React.FC<MusicCardProps> = ({
           {/* KÖZÉPSŐ RÉSZ: Dinamikus nézet (Bakelit VAGY Élő Karaoke) */}
           <div className="flex flex-col items-center justify-center my-auto w-full gap-3">
             {showFrontLyrics && track.lyrics ? (
-              /* --- 1. DALSZÖVEG NÉZET AZ ELŐLAPON --- */
               <div className="w-full flex flex-col items-center">
                 <div className="flex items-center gap-2 mb-2 text-neutral-400">
                   <Disc3 className="w-4 h-4 text-amber-400 animate-[spin_6s_linear_infinite]" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400">
-                    Énekelj velünk!
+                    Énekelj velünk! (Kattints sorra az odaugráshoz)
                   </span>
                 </div>
 
-                {/* Apple Music stílusú lebegő szövegdoboz maszkkal */}
-                <div className="w-full h-64 sm:h-72 bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_15%,black_85%,transparent_100%)] flex flex-col gap-3.5 py-6">
+                {/* Zárt görgetősáv - nem mozdítja el a képernyőt */}
+                <div
+                  ref={frontContainerRef}
+                  className="w-full h-64 sm:h-72 bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_15%,black_85%,transparent_100%)] flex flex-col gap-3.5 py-6"
+                >
                   {parsedLyrics.map((line, idx) => {
                     const isActive = idx === activeIndex;
                     return (
                       <p
                         key={idx}
                         ref={isActive ? frontLyricsRef : null}
-                        className={`text-center transition-all duration-300 font-bold leading-relaxed ${
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (line.time >= 0 && onSeek) onSeek(line.time);
+                        }}
+                        className={`text-center cursor-pointer transition-all duration-300 font-bold leading-relaxed hover:opacity-100 ${
                           isActive
                             ? "text-amber-300 text-sm sm:text-base font-black scale-105 drop-shadow-[0_0_12px_rgba(251,191,36,0.9)] opacity-100"
-                            : "text-neutral-500 text-xs sm:text-sm opacity-35 blur-[0.2px]"
+                            : "text-neutral-500 text-xs sm:text-sm opacity-35 blur-[0.2px] hover:blur-none"
                         }`}
                       >
                         {line.text}
@@ -167,7 +176,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 </div>
               </div>
             ) : (
-              /* --- 2. KLASSZIKUS BAKELIT NÉZET --- */
               <div className="flex flex-col items-center gap-4 py-8">
                 <div className="relative w-36 h-36 sm:w-44 sm:h-44 flex items-center justify-center">
                   <div className="absolute inset-0 rounded-full bg-amber-500/10 blur-2xl animate-pulse" />
@@ -192,15 +200,12 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             )}
           </div>
 
-          {/* Alsó megfordítási felhívás */}
           <div className="text-center text-[10px] uppercase font-extrabold tracking-widest text-neutral-500 pt-1">
             Kattints vagy nyomj Space-t a felfedéshez ↷
           </div>
         </div>
 
-        {/* ========================================================================= */}
         {/* ================= HÁTLAP (NAGY MEGOLDÁS + BORÍTÓ + LYRICS) ================ */}
-        {/* ========================================================================= */}
         <div
           className="absolute inset-0 w-full h-full rounded-[36px] bg-gradient-to-b from-neutral-900 via-neutral-950 to-neutral-950 border-2 border-amber-500/50 p-5 flex flex-col justify-between shadow-[0_0_60px_rgba(245,158,11,0.25)] overflow-hidden"
           style={{
@@ -219,7 +224,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
 
           {/* KÖZÉP: BORÍTÓKÉP ÉS NAGY ADATOK */}
           <div className="flex flex-col items-center gap-2.5 my-auto w-full">
-            {/* ALBUM BORÍTÓ */}
             <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden border-2 border-neutral-700 shadow-2xl bg-neutral-950 flex items-center justify-center shrink-0">
               {track.coverUrl ? (
                 <img
@@ -237,9 +241,8 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               )}
             </div>
 
-            {/* ADATOK SZEKCIÓ (NAGY ÉS HANGSÚLYOS!) */}
             <div className="w-full flex flex-col gap-1.5 text-center">
-              {/* 1. ÉVSZÁM (Nagy, látványos) */}
+              {/* 1. ÉVSZÁM */}
               <motion.div
                 animate={highlight === "year" ? { scale: [1, 1.04, 1] } : {}}
                 transition={{ repeat: Infinity, duration: 2 }}
@@ -304,7 +307,10 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                   <span className="text-neutral-500 font-mono text-[8px]">Sync</span>
                 </div>
 
-                <div className="w-full h-20 sm:h-24 overflow-y-auto flex flex-col gap-2 py-2 px-1 scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_20%,black_80%,transparent_100%)]">
+                <div
+                  ref={backContainerRef}
+                  className="w-full h-20 sm:h-24 overflow-y-auto flex flex-col gap-2 py-2 px-1 scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_20%,black_80%,transparent_100%)]"
+                >
                   {parsedLyrics.length > 0 ? (
                     parsedLyrics.map((line, idx) => {
                       const isActive = idx === activeIndex;
@@ -312,10 +318,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                         <p
                           key={idx}
                           ref={isActive ? backLyricsRef : null}
-                          className={`text-center transition-all duration-300 font-bold leading-tight ${
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (line.time >= 0 && onSeek) onSeek(line.time);
+                          }}
+                          className={`text-center cursor-pointer transition-all duration-300 font-bold leading-tight hover:opacity-100 ${
                             isActive
                               ? "text-amber-300 text-xs sm:text-sm font-black scale-105 drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] opacity-100"
-                              : "text-neutral-500 text-[11px] opacity-35"
+                              : "text-neutral-500 text-[11px] opacity-35 hover:opacity-80"
                           }`}
                         >
                           {line.text}
@@ -332,7 +342,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             )}
           </div>
 
-          {/* Visszafordítás jelzés */}
           <div className="text-center text-[10px] text-neutral-500 font-extrabold uppercase tracking-wider pt-0.5">
             Kattints a kártyára a visszazáráshoz ↷
           </div>

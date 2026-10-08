@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette } from "lucide-react";
+import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette, Volume2 } from "lucide-react";
 import confetti from "canvas-confetti";
 
 export type TargetHighlight = "year" | "title" | "artist" | "all";
@@ -23,19 +23,70 @@ export interface PresetPack {
   categories: Category[];
 }
 
+// 🎯 A TÁBLÁZAT 5 HIVATALOS SZÍNÉVEL ÖSSZEHANGOLT ALAPKATEGÓRIÁK
+export const CATEGORIES: Category[] = [
+  {
+    id: "year",
+    label: "Évszám",
+    lines: ["MEGJELENÉS", "ÉVE"],
+    desc: "Találd el a megjelenés évét!",
+    targetType: "year",
+    colors: ["#d97706", "#b45309"],
+    accent: "#f59e0b",
+  },
+  {
+    id: "title",
+    label: "Dal címe",
+    lines: ["PONTOS", "DALCÍM"],
+    desc: "Mi a szám pontos címe?",
+    targetType: "title",
+    colors: ["#059669", "#047857"],
+    accent: "#10b981",
+  },
+  {
+    id: "artist",
+    label: "Előadó",
+    lines: ["ELŐADÓ", "NEVE"],
+    desc: "Ki énekli a dalt?",
+    targetType: "artist",
+    colors: ["#db2777", "#9d174d"],
+    accent: "#ec4899",
+  },
+  {
+    id: "all",
+    label: "Mindent bele",
+    lines: ["MINDENT", "BELE!"],
+    desc: "Év, cím és előadó egyszerre!",
+    targetType: "all",
+    colors: ["#7c3aed", "#5b21b6"],
+    accent: "#8b5cf6",
+  },
+  {
+    id: "bonus",
+    label: "Szabad tipp",
+    lines: ["SZABAD", "TIPP"],
+    desc: "Válassz egy tetszőleges mezőt!",
+    targetType: "year",
+    colors: ["#0284c7", "#0369a1"],
+    accent: "#06b6d4",
+  },
+];
+
 export const CHALLENGE_PRESETS: Record<string, PresetPack> = {
+  boardClassic: {
+    name: "Táblázat Színek (Hivatalos 5 Szín)",
+    categories: CATEGORIES,
+  },
   partyMaster: {
-    name: "Teljes Buli Kvíz (Minden feladvány)",
+    name: "Teljes Buli Kvíz (Haladó)",
     categories: [
       { id: "c_exact_year", label: "Pontos Évszám", lines: ["PONTOS", "ÉVSZÁM"], desc: "Hajszálpontos évszám szükséges!", targetType: "year", colors: ["#d97706", "#b45309"], accent: "#f59e0b" },
-      { id: "c_year_2", label: "Évszám (±2 év)", lines: ["ÉVSZÁM", "±2 ÉV"], desc: "Maximum 2 év tévedés megengedett", targetType: "year", colors: ["#ea580c", "#c2410c"], accent: "#f97316" },
-      { id: "c_year_5", label: "Évszám (±5 év)", lines: ["ÉVSZÁM", "±5 ÉV"], desc: "Legfeljebb 5 év eltérés fogadható el", targetType: "year", colors: ["#db2777", "#9d174d"], accent: "#ec4899" },
-      { id: "c_decade", label: "Melyik Évtized?", lines: ["MELYIK", "ÉVTIZED?"], desc: "Csak az évtizedet kell eltalálni (pl. 80-asok)", targetType: "year", colors: ["#7c3aed", "#5b21b6"], accent: "#8b5cf6" },
-      { id: "c_2000", label: "2000 Előtt v. Után?", lines: ["2000 ELŐTT", "V. UTÁN?"], desc: "Az ezredforduló előtt vagy után adták ki?", targetType: "year", colors: ["#0284c7", "#0369a1"], accent: "#06b6d4" },
       { id: "c_title", label: "Pontos Dalcím", lines: ["PONTOS", "DALCÍM"], desc: "Mi a dal hivatalos címe?", targetType: "title", colors: ["#059669", "#047857"], accent: "#10b981" },
-      { id: "c_artist", label: "Előadó Neve", lines: ["ELŐADÓ", "NEVE"], desc: "Ki énekli vagy játssza a dalt?", targetType: "artist", colors: ["#dc2626", "#991b1b"], accent: "#ef4444" },
-      { id: "c_band", label: "Együttes v. Szóló?", lines: ["EGYÜTTES", "V. SZÓLÓ?"], desc: "Zenekar/együttes vagy szóló énekes?", targetType: "artist", colors: ["#4f46e5", "#3730a3"], accent: "#6366f1" },
-      { id: "c_genre", label: "Zenei Műfaj", lines: ["ZENEI", "MŰFAJ"], desc: "Pl. Rock, Pop, Disco, Rap, Mulatós", targetType: "all", colors: ["#0891b2", "#155e75"], accent: "#22d3ee" },
+      { id: "c_artist", label: "Előadó Neve", lines: ["ELŐADÓ", "NEVE"], desc: "Ki énekli a dalt?", targetType: "artist", colors: ["#db2777", "#9d174d"], accent: "#ec4899" },
+      { id: "c_all", label: "Mindent bele", lines: ["MINDENT", "BELE!"], desc: "Év, cím és előadó egyszerre!", targetType: "all", colors: ["#7c3aed", "#5b21b6"], accent: "#8b5cf6" },
+      { id: "c_bonus", label: "Szabad tipp", lines: ["SZABAD", "TIPP"], desc: "Válassz egy mezőt!", targetType: "year", colors: ["#0284c7", "#0369a1"], accent: "#06b6d4" },
+      { id: "c_year_2", label: "Évszám (±2 év)", lines: ["ÉVSZÁM", "±2 ÉV"], desc: "Max 2 év tévedés megengedett", targetType: "year", colors: ["#ea580c", "#c2410c"], accent: "#f97316" },
+      { id: "c_decade", label: "Melyik Évtized?", lines: ["MELYIK", "ÉVTIZED?"], desc: "Csak az évtized kell (pl. 80-asok)", targetType: "year", colors: ["#4f46e5", "#3730a3"], accent: "#6366f1" },
     ],
   },
   yearFocus: {
@@ -48,26 +99,15 @@ export const CHALLENGE_PRESETS: Record<string, PresetPack> = {
       { id: "y_2000", label: "2000 Előtt / Után?", lines: ["2000 ELŐTT", "VAGY UTÁN?"], desc: "Ezredforduló előtti vagy utáni?", targetType: "year", colors: ["#0284c7", "#0369a1"], accent: "#06b6d4" },
     ],
   },
-  namesAndStyle: {
-    name: "Cím, Előadó & Műfaj",
-    categories: [
-      { id: "ns_title", label: "Pontos Dalcím", lines: ["PONTOS", "DALCÍM"], desc: "Dal pontos címe", targetType: "title", colors: ["#059669", "#047857"], accent: "#10b981" },
-      { id: "ns_artist", label: "Előadó Neve", lines: ["ELŐADÓ", "NEVE"], desc: "Énekes / Zenekar neve", targetType: "artist", colors: ["#dc2626", "#991b1b"], accent: "#ef4444" },
-      { id: "ns_band", label: "Együttes v. Szóló?", lines: ["EGYÜTTES", "V. SZÓLÓ?"], desc: "Csapat vagy egyetlen ember?", targetType: "artist", colors: ["#4f46e5", "#3730a3"], accent: "#6366f1" },
-      { id: "ns_genre", label: "Zenei Műfaj", lines: ["ZENEI", "MŰFAJ"], desc: "Milyen stílusú a szám?", targetType: "all", colors: ["#0891b2", "#155e75"], accent: "#22d3ee" },
-      { id: "ns_bonus", label: "Cím ÉS Előadó (2x)", lines: ["CÍM ÉS", "ELŐADÓ!"], desc: "Dupla pont jár mindkettőért!", targetType: "title", colors: ["#eab308", "#ca8a04"], accent: "#facc15" },
-    ],
-  },
 };
 
 const COLOR_PRESETS: Array<{ label: string; colors: [string, string]; accent: string }> = [
   { label: "Borostyán", colors: ["#d97706", "#b45309"], accent: "#f59e0b" },
-  { label: "Narancs", colors: ["#ea580c", "#c2410c"], accent: "#f97316" },
-  { label: "Pink", colors: ["#db2777", "#9d174d"], accent: "#ec4899" },
-  { label: "Lila", colors: ["#7c3aed", "#5b21b6"], accent: "#8b5cf6" },
-  { label: "Kék", colors: ["#0284c7", "#0369a1"], accent: "#06b6d4" },
   { label: "Smaragd", colors: ["#059669", "#047857"], accent: "#10b981" },
-  { label: "Piros", colors: ["#dc2626", "#991b1b"], accent: "#ef4444" },
+  { label: "Rózsaszín", colors: ["#db2777", "#9d174d"], accent: "#ec4899" },
+  { label: "Lila", colors: ["#7c3aed", "#5b21b6"], accent: "#8b5cf6" },
+  { label: "Cián", colors: ["#0284c7", "#0369a1"], accent: "#06b6d4" },
+  { label: "Narancs", colors: ["#ea580c", "#c2410c"], accent: "#f97316" },
   { label: "Indigó", colors: ["#4f46e5", "#3730a3"], accent: "#6366f1" },
 ];
 
@@ -78,21 +118,74 @@ const splitLabelToLines = (text: string): [string, string] => {
   return [parts.slice(0, mid).join(" ").toUpperCase(), parts.slice(mid).join(" ").toUpperCase()];
 };
 
+// ================= HANGEFFEKT SZINTETIZÁTOR (Web Audio API) =================
+const playClickTone = (audioCtx: AudioContext) => {
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(650 + Math.random() * 150, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.035);
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.035);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.035);
+  } catch (_) {}
+};
+
+const playFanfareTone = (audioCtx: AudioContext) => {
+  try {
+    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 (Győzelmi akkord)
+    notes.forEach((freq, idx) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const startTime = audioCtx.currentTime + idx * 0.09;
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.2, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.45);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 0.45);
+    });
+  } catch (_) {}
+};
+
 interface RouletteWheelProps {
   onSpinEnd?: (selectedCategory: Category) => void;
 }
 
 export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
-  const [categories, setCategories] = useState<Category[]>(CHALLENGE_PRESETS.partyMaster.categories);
+  // Alapértelmezettként a táblázat 5 színe aktív!
+  const [categories, setCategories] = useState<Category[]>(CATEGORIES);
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [winner, setWinner] = useState<Category | null>(null);
 
-  // Portal mount check
+  // Disco animáció villogó állapota
+  const [discoStep, setDiscoStep] = useState(0);
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Disco villogó lépések pörgés közben
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isSpinning) {
+      interval = setInterval(() => {
+        setDiscoStep((prev) => (prev + 1) % 5);
+      }, 90);
+    }
+    return () => clearInterval(interval);
+  }, [isSpinning]);
 
   // GUI Studio Állapotok
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -106,6 +199,16 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
 
   const spin = () => {
     if (isSpinning || categories.length === 0) return;
+
+    // Web Audio inicializálás
+    if (!audioCtxRef.current) {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtxClass) audioCtxRef.current = new AudioCtxClass();
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
+
     setIsSpinning(true);
     setWinner(null);
 
@@ -121,14 +224,29 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
 
     setRotation(finalRotation);
 
+    // Kerepelő kattogó hangok szimulációja lassuló ütemben
+    if (audioCtxRef.current) {
+      const delays = [
+        60, 110, 160, 210, 260, 310, 360, 420, 480, 550, 630, 720, 820, 930, 1050, 1200, 1400, 1650, 1950, 2300, 2700, 3150, 3650
+      ];
+      delays.forEach((d) => {
+        if (d < 4000) {
+          setTimeout(() => {
+            if (audioCtxRef.current) playClickTone(audioCtxRef.current);
+          }, d);
+        }
+      });
+    }
+
     setTimeout(() => {
       setIsSpinning(false);
       setWinner(selected);
+      if (audioCtxRef.current) playFanfareTone(audioCtxRef.current);
       if (onSpinEnd) onSpinEnd(selected);
 
       confetti({
-        particleCount: 85,
-        spread: 65,
+        particleCount: 90,
+        spread: 70,
         origin: { y: 0.65 },
         colors: [selected.accent, "#ffffff", "#fbbf24"],
       });
@@ -152,10 +270,9 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   };
 
   const getFontSize = () => {
-    if (numSlices <= 6) return { line1: 11, line2: 10, y1: 76, y2: 92 };
-    if (numSlices <= 8) return { line1: 9.5, line2: 8.5, y1: 72, y2: 86 };
-    if (numSlices <= 10) return { line1: 8.5, line2: 7.5, y1: 68, y2: 80 };
-    return { line1: 7.5, line2: 6.5, y1: 65, y2: 76 };
+    if (numSlices <= 5) return { line1: 12, line2: 11, y1: 76, y2: 94 };
+    if (numSlices <= 8) return { line1: 10, line2: 9, y1: 72, y2: 86 };
+    return { line1: 8.5, line2: 7.5, y1: 68, y2: 80 };
   };
   const fontConfig = getFontSize();
 
@@ -240,35 +357,57 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
     </svg>
   );
 
+  const discoColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
+
   return (
     <div className="flex flex-col items-center gap-5 w-full max-w-md select-none">
-      {/* NAGY KERÉK TEST */}
+      {/* NAGY KERÉK TEST + DISCO LED ÉS FÉNYHATÁSOK */}
       <div className="relative w-80 h-80 sm:w-96 sm:h-96 flex items-center justify-center">
-        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-amber-500/20 via-rose-500/20 to-violet-600/30 blur-2xl animate-pulse" />
+        {/* Disco pulzáló háttérköd */}
+        <div
+          className="absolute inset-0 rounded-full blur-3xl transition-all duration-300"
+          style={{
+            backgroundColor: isSpinning
+              ? `${discoColors[discoStep]}45`
+              : winner
+              ? `${winner.accent}35`
+              : "rgba(245, 158, 11, 0.2)",
+            transform: isSpinning ? "scale(1.12)" : "scale(1)",
+          }}
+        />
 
-        {/* Felső mutató */}
+        {/* Felső nyíl mutató */}
         <div className="absolute -top-4 z-30 flex flex-col items-center drop-shadow-[0_10px_15px_rgba(0,0,0,0.9)]">
           <motion.div
-            animate={isSpinning ? { rotate: [0, -12, 10, -6, 0] } : { rotate: 0 }}
-            transition={isSpinning ? { repeat: Infinity, duration: 0.16 } : { duration: 0.25 }}
-            className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[28px] border-t-amber-400 filter drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]"
+            animate={isSpinning ? { rotate: [0, -14, 12, -8, 0] } : { rotate: 0 }}
+            transition={isSpinning ? { repeat: Infinity, duration: 0.14 } : { duration: 0.25 }}
+            className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[28px] border-t-amber-400 filter drop-shadow-[0_0_12px_rgba(251,191,36,0.95)]"
           />
           <div className="w-3.5 h-3.5 rounded-full bg-amber-200 border-2 border-neutral-900 -mt-7" />
         </div>
 
-        {/* Keréktest és LED-ek */}
+        {/* Keréktest és a 24 db Disco LED pont */}
         <div className="relative w-full h-full rounded-full p-2.5 bg-neutral-900 border-4 border-neutral-800 shadow-[0_0_50px_rgba(0,0,0,0.95)]">
           {Array.from({ length: 24 }).map((_, i) => {
             const angle = (360 / 24) * i;
+            const ledColor = isSpinning
+              ? discoColors[(i + discoStep) % discoColors.length]
+              : winner
+              ? winner.accent
+              : i % 2 === 0
+              ? "#fbbf24"
+              : "#ffffff";
+
             return (
               <div
                 key={i}
-                className="absolute w-2.5 h-2.5 rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-colors duration-300 z-20"
+                className="absolute w-2.5 h-2.5 rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-all duration-150 z-20"
                 style={{
                   top: `${50 - 47.5 * Math.cos((angle * Math.PI) / 180)}%`,
                   left: `${50 + 47.5 * Math.sin((angle * Math.PI) / 180)}%`,
-                  backgroundColor: isSpinning ? (i % 2 === 0 ? "#fbbf24" : "#f43f5e") : "#fef08a",
-                  boxShadow: `0 0 8px ${isSpinning ? "#f43f5e" : "#fef08a"}`,
+                  backgroundColor: ledColor,
+                  boxShadow: `0 0 10px ${ledColor}`,
+                  transform: isSpinning ? "translate(-50%, -50%) scale(1.2)" : "translate(-50%, -50%) scale(1)",
                 }}
               />
             );
@@ -298,7 +437,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
           <div className="flex items-center justify-center gap-2.5 px-4 py-2 rounded-[14px] bg-neutral-950/90 group-hover:bg-neutral-950/70 transition">
             <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
             <span className="text-xs sm:text-sm font-black tracking-widest uppercase bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-300 to-white">
-              {isSpinning ? "PÖRGÉS..." : "RULETT PÖRGETÉS"}
+              {isSpinning ? "DISCO PÖRGÉS..." : "RULETT PÖRGETÉS"}
             </span>
           </div>
         </button>
@@ -306,7 +445,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
         <button
           onClick={() => setIsEditorOpen(true)}
           className="p-3.5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition active:scale-95 shadow-lg"
-          title="Kerék Élő Stúdió & Feladványok szerkesztése"
+          title="Kerék Stúdió & Feladványok szerkesztése"
         >
           <Settings2 className="w-5 h-5" />
         </button>
@@ -338,9 +477,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
         )}
       </AnimatePresence>
 
-      {/* ======================================================== */}
-      {/* REACT PORTAL: GARANTÁLTAN A TELJES KÉPERNYŐT TÖLTI KI! */}
-      {/* ======================================================== */}
+      {/* ================= REACT PORTAL STÚDIÓ ================= */}
       {mounted &&
         createPortal(
           <AnimatePresence>
@@ -373,10 +510,8 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                     </button>
                   </div>
 
-                  {/* KÉTPANELES TÁGAS ELRENDEZÉS */}
                   <div className="flex flex-col md:flex-row items-stretch gap-6">
-                    
-                    {/* BAL OLDAL: FIX SZÉLESSÉGŰ ÉLŐ ELŐNÉZET (NEM TUD SZÉTCSÚSZNI) */}
+                    {/* BAL OLDAL: ÉLŐ ELŐNÉZET */}
                     <div className="w-full md:w-[280px] shrink-0 flex flex-col items-center justify-center p-4 rounded-2xl bg-neutral-950 border border-neutral-800/80 shadow-inner">
                       <div className="flex items-center justify-between w-full mb-2 px-1">
                         <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -387,7 +522,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                         </span>
                       </div>
 
-                      {/* Élő Kerék grafika */}
                       <div className="relative w-52 h-52 sm:w-60 sm:h-60 rounded-full p-2 bg-neutral-900 border-4 border-neutral-800 shadow-2xl my-2 shrink-0">
                         <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-20 w-0 h-0 border-l-[9px] border-l-transparent border-r-[9px] border-r-transparent border-t-[16px] border-t-amber-400" />
                         <div className="w-full h-full rounded-full overflow-hidden">
@@ -402,11 +536,10 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
 
                     {/* JOBB OLDAL: SZERKESZTŐ ÉS CSOMAGOK */}
                     <div className="flex-1 flex flex-col gap-4 min-w-0">
-                      
                       {/* 1. Kész Kihívás-csomagok */}
                       <div className="flex flex-col gap-1.5">
                         <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
-                          <Layers className="w-3 h-3 text-amber-400" /> Kész Kihívás-Csomagok
+                          <Layers className="w-3 h-3 text-amber-400" /> Kész Csomagok (Kattints a váltáshoz)
                         </span>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {Object.entries(CHALLENGE_PRESETS).map(([key, pack]) => (
@@ -456,7 +589,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                               <option value="year">📅 Évszám</option>
                               <option value="title">🎵 Dalcím</option>
                               <option value="artist">🎤 Előadó</option>
-                              <option value="all">✨ Általános</option>
+                              <option value="all">✨ Mindent bele</option>
                             </select>
                           </div>
 
@@ -485,7 +618,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                         </div>
                       </form>
 
-                      {/* 3. Aktív szeletek görgethető listája */}
+                      {/* 3. Aktív szeletek listája */}
                       <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
                         {categories.map((cat, idx) => (
                           <div
@@ -529,11 +662,11 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                       {/* Alsó gombsor */}
                       <div className="flex justify-between items-center pt-2 border-t border-neutral-800 text-xs mt-auto">
                         <button
-                          onClick={() => setCategories(CHALLENGE_PRESETS.partyMaster.categories)}
+                          onClick={() => setCategories(CATEGORIES)}
                           className="text-neutral-500 hover:text-amber-400 flex items-center gap-1 transition"
                         >
                           <RotateCcw className="w-3 h-3" />
-                          <span>Alaphelyzet</span>
+                          <span>Alapértelmezett (5 Szín)</span>
                         </button>
 
                         <button

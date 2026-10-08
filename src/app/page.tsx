@@ -8,16 +8,32 @@ import { PlayerBoard, PlayerData, createEmptyGrid, checkBingo } from "../compone
 import { Track } from "../types/track";
 import { supabase } from "../lib/supabase";
 import { PinGate } from "../components/PinGate";
-import { Play, Pause, SkipForward, Timer, Sparkles, LayoutGrid, Disc, Eye, QrCode, Smartphone, X, Users, Music2 } from "lucide-react";
+import { 
+  Play, 
+  Pause, 
+  SkipForward, 
+  Timer, 
+  Sparkles, 
+  LayoutGrid, 
+  Disc, 
+  Eye, 
+  QrCode, 
+  Smartphone, 
+  X, 
+  Users, 
+  Music2,
+  Tv
+} from "lucide-react";
 import confetti from "canvas-confetti";
 
-const TIME_OPTIONS = [15, 30, 45, 60];
+// 0 = Végig menjen a zene korlát nélkül
+const TIME_OPTIONS = [15, 30, 45, 60, 0];
 type MusicFilter = "all" | "hungarian" | "international";
 
 export default function Home() {
   const allTracks: Track[] = tracksData;
 
-  // KÜLÖN ZENEI SZŰRŐ (Magyar / Nemzetközi / Vegyes)
+  // Zenei szűrő (Magyar / Nemzetközi / Vegyes)
   const [musicFilter, setMusicFilter] = useState<MusicFilter>("all");
 
   const filteredTracks = React.useMemo(() => {
@@ -43,17 +59,20 @@ export default function Home() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0); // Élő másodperc a dalszöveg szinkronhoz
+  const [currentTime, setCurrentTime] = useState(0);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [autoPlayCountdown, setAutoPlayCountdown] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"boards" | "game">("boards");
-  
-  // Állítható időtartam
+
+  // Házigazda TV nézetrögzítő (Ha false, nem váltogatja át a lapot automatikusan)
+  const [autoSwitchTab, setAutoSwitchTab] = useState(false);
+
+  // Állítható időtartam (0 = Végig)
   const [selectedDuration, setSelectedDuration] = useState<number>(45);
   const [timeLeft, setTimeLeft] = useState<number>(45);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Kártya célkiemelés (A kerék automatikusan átállítja!)
+  // Kártya célkiemelés
   const [guessTarget, setGuessTarget] = useState<GuessTarget>("year");
 
   // Játékosok listája
@@ -70,6 +89,14 @@ export default function Home() {
   const [isJoinedAsClient, setIsJoinedAsClient] = useState(false);
   const [clientGrid, setClientGrid] = useState<boolean[][]>(createEmptyGrid());
   const [clientNotes, setClientNotes] = useState<string>("");
+
+  // Élő Supabase csatorna referencia az azonnali broadcast küldéshez
+  const channelRef = useRef<any>(null);
+  const activeCategoryRef = useRef<Category | null>(null);
+
+  useEffect(() => {
+    activeCategoryRef.current = activeCategory;
+  }, [activeCategory]);
 
   const currentTrack = filteredTracks[currentIndex] || allTracks[0];
 
@@ -106,14 +133,16 @@ export default function Home() {
     setIsHostModalOpen(true);
   };
 
-  // Realtime Supabase Broadcast
+  // Realtime Supabase Broadcast (Játékosok és feladványok élő szinkronja)
   useEffect(() => {
     if (!roomCode) return;
 
     const channel = supabase.channel(`room_${roomCode}`, {
       config: { broadcast: { self: false } },
     });
+    channelRef.current = channel;
 
+    // 1. Játékosok tábláinak frissítése
     channel.on("broadcast", { event: "player_sync" }, ({ payload }) => {
       setPlayers((prev) => {
         const existingIdx = prev.findIndex((p) => p.name.toLowerCase() === payload.name.toLowerCase());
@@ -141,13 +170,31 @@ export default function Home() {
           ];
         }
       });
+
+      // Ha a Host észreveszi az új játékost, visszaküldi az aktív feladványt neki
+      if (!isJoinedAsClient && activeCategoryRef.current) {
+        channel.send({
+          type: "broadcast",
+          event: "game_state",
+          payload: { activeCategory: activeCategoryRef.current, targetType: activeCategoryRef.current.targetType },
+        });
+      }
+    });
+
+    // 2. Feladvány érkezése a TV-ről a telefonokra
+    channel.on("broadcast", { event: "game_state" }, ({ payload }) => {
+      if (payload.activeCategory) {
+        setActiveCategory(payload.activeCategory);
+        setGuessTarget(payload.targetType || payload.activeCategory.targetType);
+      }
     });
 
     channel.subscribe();
     return () => {
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
-  }, [roomCode]);
+  }, [roomCode, isJoinedAsClient]);
 
   const handleClientTileClick = (r: number, c: number) => {
     const newGrid = clientGrid.map((row, rIdx) =>
@@ -159,9 +206,8 @@ export default function Home() {
     const hasWon = checkBingo(newGrid);
     if (hasWon) confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
 
-    if (roomCode) {
-      const channel = supabase.channel(`room_${roomCode}`);
-      channel.send({
+    if (channelRef.current) {
+      channelRef.current.send({
         type: "broadcast",
         event: "player_sync",
         payload: { id: playerName, name: playerName, grid: newGrid, notes: clientNotes, hasWon },
@@ -173,9 +219,8 @@ export default function Home() {
     setClientNotes(notes);
     localStorage.setItem("hit_player_notes", notes);
 
-    if (roomCode) {
-      const channel = supabase.channel(`room_${roomCode}`);
-      channel.send({
+    if (channelRef.current) {
+      channelRef.current.send({
         type: "broadcast",
         event: "player_sync",
         payload: { id: playerName, name: playerName, grid: clientGrid, notes, hasWon: checkBingo(clientGrid) },
@@ -190,9 +235,8 @@ export default function Home() {
     setIsJoinModalOpen(false);
     setIsJoinedAsClient(true);
 
-    if (roomCode) {
-      const channel = supabase.channel(`room_${roomCode}`);
-      channel.send({
+    if (channelRef.current) {
+      channelRef.current.send({
         type: "broadcast",
         event: "player_sync",
         payload: { id: playerName, name: playerName, grid: clientGrid, notes: clientNotes, hasWon: false },
@@ -200,9 +244,10 @@ export default function Home() {
     }
   };
 
+  // Időzítő visszaszámláló: 0 másodpercnél végig szól a zene korlát nélkül!
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isPlaying && timeLeft > 0) {
+    if (isPlaying && selectedDuration > 0 && timeLeft > 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -214,20 +259,29 @@ export default function Home() {
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, timeLeft]);
+  }, [isPlaying, timeLeft, selectedDuration]);
 
   const handleDurationChange = (seconds: number) => {
     setSelectedDuration(seconds);
     if (!isPlaying) setTimeLeft(seconds);
   };
 
-  // KERÉK MEGÁLLÁSA: Automatikusan átállítja a kártya kiemelési célját is!
+  // KERÉK MEGÁLLÁSA: Átállítja a célt + kiküldi a szobába a telefonoknak
   const handleSpinEnd = (cat: Category) => {
     setActiveCategory(cat);
     setGuessTarget(cat.targetType);
     setAutoPlayCountdown(3);
+
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "game_state",
+        payload: { activeCategory: cat, targetType: cat.targetType },
+      });
+    }
   };
 
+  // Automatikus zeneindítás a pörgetés visszaszámlálója után
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (autoPlayCountdown !== null && autoPlayCountdown > 0) {
@@ -243,13 +297,27 @@ export default function Home() {
         setIsPlaying(true);
         setTimeLeft(selectedDuration);
       }
-      setActiveTab("boards");
+      if (autoSwitchTab) {
+        setActiveTab("boards");
+      }
     }
     return () => clearTimeout(timer);
-  }, [autoPlayCountdown, selectedDuration]);
+  }, [autoPlayCountdown, selectedDuration, autoSwitchTab]);
+
+  // Kattintásra odaugrás a dalszövegben
+  const handleSeek = (time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setCurrentTime(time);
+      if (!isPlaying) {
+        audioRef.current.play();
+        setIsPlaying(true);
+      }
+    }
+  };
 
   const handleFlipAndShow = () => {
-    if (activeTab !== "game") setActiveTab("game");
+    if (activeTab !== "game" && autoSwitchTab) setActiveTab("game");
     const nextFlipped = !isFlipped;
     setIsFlipped(nextFlipped);
     if (nextFlipped) {
@@ -319,6 +387,20 @@ export default function Home() {
             </button>
           </header>
 
+          {/* TELEFONOS FELADVÁNY EMLÉKEZTETŐ SÁV */}
+          {activeCategory && (
+            <div
+              className="w-full max-w-xs py-2 px-3 rounded-2xl border text-center font-black text-xs uppercase tracking-wider my-2 shadow-lg transition-all animate-pulse"
+              style={{
+                backgroundColor: `${activeCategory.accent}20`,
+                borderColor: activeCategory.accent,
+                color: activeCategory.accent,
+              }}
+            >
+              🎯 Feladvány: {activeCategory.label} ({activeCategory.desc})
+            </div>
+          )}
+
           <div className="w-full max-w-xs flex flex-col gap-3 my-auto">
             <div className="bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-3 shadow-2xl">
               <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800">
@@ -371,7 +453,7 @@ export default function Home() {
               <p className="text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
             </div>
 
-            {/* NÉZETVÁLTÓ ÉS MULTIPLAYER */}
+            {/* NÉZETVÁLTÓ, TV ZÁRÁS ÉS MULTIPLAYER */}
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 bg-neutral-900 p-1 rounded-2xl border border-neutral-800">
                 <button
@@ -394,6 +476,21 @@ export default function Home() {
                   <span>Rulett & Kártya</span>
                 </button>
               </div>
+
+              {/* HÁZIGAZDA TV NÉZET-KAPCSOLÓ */}
+              <button
+                onClick={() => setAutoSwitchTab((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  autoSwitchTab
+                    ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="Ha kikapcsolod (Rögzítve), nem vált át automatikusan a táblákra a pörgetés után"
+              >
+                <Tv className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Auto lapozás:</span>
+                <span>{autoSwitchTab ? "BE" : "RÖGZÍTVE"}</span>
+              </button>
 
               <button
                 onClick={handleCreateRoom}
@@ -424,12 +521,12 @@ export default function Home() {
                         : "text-neutral-400 hover:text-white"
                     }`}
                   >
-                    {sec}s
+                    {sec === 0 ? "Végig" : `${sec}s`}
                   </button>
                 ))}
               </div>
-              <span className="text-amber-400 font-bold px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800">
-                {timeLeft}s
+              <span className="text-amber-400 font-bold px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800 min-w-10 text-center">
+                {selectedDuration === 0 ? "∞" : `${timeLeft}s`}
               </span>
             </div>
           </header>
@@ -541,6 +638,7 @@ export default function Home() {
                       onFlip={handleFlipAndShow}
                       highlight={guessTarget}
                       currentTime={currentTime}
+                      onSeek={handleSeek}
                     />
                   </div>
                 </div>
