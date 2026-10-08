@@ -63,7 +63,6 @@ export default function Home() {
   // Szűrt zenei lista (Zenei típus + Évszám határok alapján)
   const filteredTracks = React.useMemo(() => {
     return allTracks.filter((t) => {
-      // 1. Zenei csomag szűrés
       const isHu =
         (t as any).language === "hu" ||
         (t as any).genre?.toLowerCase().includes("magyar") ||
@@ -72,7 +71,6 @@ export default function Home() {
       if (musicFilter === "hungarian" && !isHu) return false;
       if (musicFilter === "international" && isHu) return false;
 
-      // 2. Évszám intervallum szűrés
       if (typeof t.year === "number") {
         if (t.year < minYear || t.year > maxYear) return false;
       }
@@ -81,9 +79,9 @@ export default function Home() {
     });
   }, [allTracks, musicFilter, minYear, maxYear]);
 
-  // Véletlenszerű pakli-kezelés (ismétlődés mentes amíg az összes le nem ment)
+  // Véletlenszerű pakli-kezelés (string | number kompatibilis azonosítókkal)
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [playedIds, setPlayedIds] = useState<string[]>([]);
+  const [playedIds, setPlayedIds] = useState<(string | number)[]>([]);
 
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -127,15 +125,15 @@ export default function Home() {
 
   const currentTrack = filteredTracks[currentIndex] || allTracks[0];
 
-  // Véletlenszerű dalválasztó algoritmus (Hitster pakli-mechanika)
-  const pickNextRandomIndex = (pool: Track[], currentId?: string): number => {
+  // Véletlenszerű dalválasztó (típustiszta string | number azonosítókkal)
+  const pickNextRandomIndex = (pool: Track[], currentId?: string | number): number => {
     if (!pool.length) return 0;
     if (pool.length === 1) return 0;
 
     let unplayed = pool.filter((t) => !playedIds.includes(t.id));
     if (unplayed.length === 0) {
       unplayed = pool;
-      setPlayedIds(currentId ? [currentId] : []);
+      setPlayedIds(currentId !== undefined ? [currentId] : []);
     }
 
     const candidates = unplayed.filter((t) => t.id !== currentId);
@@ -392,7 +390,6 @@ export default function Home() {
     }
   };
 
-  // KÖVETKEZŐ DAL: VÉLETLENSZERŰ SORSOLÁS
   const handleNextTrack = () => {
     setIsFlipped(false);
     handleStop();
@@ -454,7 +451,6 @@ export default function Home() {
             </div>
           </header>
 
-          {/* TELEFONOS FELADVÁNY EMLÉKEZTETŐ SÁV */}
           {activeCategory && (
             <div
               className="w-full max-w-xs py-2 px-3 rounded-2xl border text-center font-black text-xs uppercase tracking-wider my-2 shadow-lg transition-all animate-pulse"
@@ -511,7 +507,6 @@ export default function Home() {
       ) : (
         /* ==================== TV / LAPTOP FŐOLDAL ==================== */
         <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-3 sm:p-6 select-none">
-          {/* FEJLÉC */}
           <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-3 border-b border-neutral-800/80 gap-3">
             <div>
               <h1 className="text-xl sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
@@ -520,7 +515,6 @@ export default function Home() {
               <p className="text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
             </div>
 
-            {/* NÉZETVÁLTÓ, TV ZÁRÁS, MULTIPLAYER ÉS AZONNALI ZÁROLÁS */}
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 bg-neutral-900 p-1 rounded-2xl border border-neutral-800">
                 <button
@@ -544,7 +538,6 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* HÁZIGAZDA TV NÉZET-KAPCSOLÓ */}
               <button
                 onClick={() => setAutoSwitchTab((prev) => !prev)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition ${
@@ -573,7 +566,6 @@ export default function Home() {
                 )}
               </button>
 
-              {/* AZONNALI PIN ZÁROLÁS GOMB */}
               <button
                 onClick={lockPinGate}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-rose-400 hover:border-rose-500/40 text-xs font-bold transition shadow active:scale-95"
@@ -584,7 +576,6 @@ export default function Home() {
               </button>
             </div>
 
-            {/* IDŐZÍTŐ ÉS SZÁMLÁLÓ */}
             <div className="flex items-center gap-3 text-xs font-mono">
               <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-xl border border-neutral-800">
                 <Timer className="w-3.5 h-3.5 text-amber-400 ml-1.5 mr-0.5" />
@@ -608,11 +599,7 @@ export default function Home() {
             </div>
           </header>
 
-          {/* ========================================================================= */}
-          {/* SZŰRŐSÁV: ZENEI CSOMAG + RANDOM JELZŐ + KÉTIRÁNYÚ ÉVSZÁM CSÚSZKA */}
-          {/* ========================================================================= */}
           <div className="w-full max-w-6xl flex flex-col gap-2.5 py-2.5 px-2 bg-neutral-900/40 border border-neutral-800/80 rounded-2xl my-2 backdrop-blur-md">
-            {/* 1. Sor: Nyelv/Csomag választó és Keverési státusz */}
             <div className="w-full flex flex-wrap justify-between items-center gap-2 text-xs">
               <div className="flex items-center gap-1.5 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800">
                 <Music2 className="w-3.5 h-3.5 text-amber-400 ml-1.5" />
@@ -646,7 +633,6 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Random keverés indikátor */}
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-neutral-900/90 border border-neutral-800 text-[11px] font-mono text-amber-400 font-bold">
                   <Shuffle className="w-3.5 h-3.5 text-amber-400" />
@@ -662,12 +648,10 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. Sor: Kétirányú Évszám csúszkák és Korszak gyorsgombok */}
             <div className="w-full flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-neutral-800/60">
               <div className="flex items-center gap-3 flex-1 min-w-[280px]">
                 <CalendarRange className="w-4 h-4 text-cyan-400 shrink-0" />
                 
-                {/* Min év csúszka */}
                 <div className="flex flex-col flex-1 gap-0.5">
                   <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
                     <span>Kezdő év:</span>
@@ -683,7 +667,6 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Max év csúszka */}
                 <div className="flex flex-col flex-1 gap-0.5">
                   <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
                     <span>Záró év:</span>
@@ -700,13 +683,11 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Korszak státusz és Gyorsgombok */}
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-800 text-[11px] font-bold font-mono text-neutral-300">
                   {isWideOpenYears ? "Bármelyik korszak (Összes)" : `${minYear} – ${maxYear}`}
                 </span>
 
-                {/* Reset gomb */}
                 {!isWideOpenYears && (
                   <button
                     onClick={() => {
@@ -724,7 +705,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* AUDIO LEJÁTSZÓ ÉLŐ IDŐKÖVETÉSSEL */}
           <audio
             ref={audioRef}
             src={currentTrack?.audioUrl}
@@ -735,7 +715,6 @@ export default function Home() {
             }}
           />
 
-          {/* Értesítések */}
           {autoPlayCountdown !== null && (
             <div className="fixed top-20 z-50 flex items-center gap-3 px-6 py-2.5 rounded-full bg-amber-500 text-neutral-950 font-black shadow-2xl animate-bounce">
               <Sparkles className="w-5 h-5 fill-current" />
@@ -743,7 +722,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* FŐ TARTALOM */}
           <div className="w-full flex justify-center items-center my-auto py-4">
             {activeTab === "boards" ? (
               <PlayerBoard
@@ -762,7 +740,6 @@ export default function Home() {
               />
             ) : (
               <div className="w-full max-w-5xl flex flex-col items-center gap-6">
-                {/* AKTÍV FELADVÁNY SÁV A KÁRTYA FELETT */}
                 {activeCategory && (
                   <div
                     className="flex items-center gap-2.5 px-5 py-2 rounded-2xl border backdrop-blur-md shadow-lg"
@@ -810,7 +787,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* ALSÓ VEZÉRLŐSÁV */}
           <footer className="w-full max-w-lg bg-neutral-900/80 backdrop-blur-lg border border-neutral-800 rounded-3xl p-3 flex items-center justify-between shadow-2xl mb-1">
             <button
               onClick={handlePlayToggle}
@@ -838,7 +814,6 @@ export default function Home() {
             </button>
           </footer>
 
-          {/* TV QR KÓD MODAL */}
           {isHostModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
               <div className="w-full max-w-sm bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-4 text-center">
@@ -882,7 +857,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* JÁTÉKOS BELÉPŐ MODAL */}
           {isJoinModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
               <div className="w-full max-w-xs bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-5 shadow-2xl flex flex-col items-center gap-4 text-center">
