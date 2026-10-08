@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette, HelpCircle } from "lucide-react";
+import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette } from "lucide-react";
 import confetti from "canvas-confetti";
 
 export type TargetHighlight = "year" | "title" | "artist" | "all";
@@ -86,6 +87,12 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [winner, setWinner] = useState<Category | null>(null);
+
+  // Portal mount check
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // GUI Studio Állapotok
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -176,7 +183,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
     setNewDesc("");
   };
 
-  // KÖZÖS SVG KERÉK ELEM (Mind a főoldalra, mind az Élő Stúdióba)
   const renderWheelSvg = (previewMode = false) => (
     <svg viewBox="0 0 400 400" className="w-full h-full">
       <defs>
@@ -333,218 +339,218 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
       </AnimatePresence>
 
       {/* ======================================================== */}
-      {/* ÉLŐ KÉTPANELES KERÉK STÚDIÓ (NEM TAKARJA KI A KEREKET!) */}
+      {/* REACT PORTAL: GARANTÁLTAN A TELJES KÉPERNYŐT TÖLTI KI! */}
       {/* ======================================================== */}
-      <AnimatePresence>
-        {isEditorOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-5xl bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5 max-h-[92vh] overflow-y-auto"
-            >
-              {/* Fejléc */}
-              <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <Settings2 className="w-5 h-5 text-amber-400" />
-                  <div>
-                    <h3 className="text-base font-black text-white uppercase tracking-wider">
-                      Kerék Stúdió & Feladvány-kezelő
-                    </h3>
-                    <p className="text-[11px] text-neutral-500">
-                      Itt állíthatod be, milyen zenei feladványokat és szabályokat sorsoljon a kerék
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsEditorOpen(false)}
-                  className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
+      {mounted &&
+        createPortal(
+          <AnimatePresence>
+            {isEditorOpen && (
+              <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md overflow-y-auto">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="w-full max-w-4xl bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col gap-5 my-auto max-h-[92vh] overflow-y-auto"
                 >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* KÉTPANELES ELRENDEZÉS: BALRA ÉLŐ KERÉK, JOBBRA VEZÉRLÉS */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                
-                {/* BAL PANEL (5 OSZLOP): ÉLŐ KERÉK ELŐNÉZET */}
-                <div className="lg:col-span-5 flex flex-col items-center justify-center p-5 rounded-2xl bg-neutral-950 border border-neutral-800/80 shadow-inner">
-                  <div className="flex items-center justify-between w-full mb-3 px-1">
-                    <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" /> Élő Kerék Előnézet
-                    </span>
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-300">
-                      {categories.length} szelet ({Math.round(sliceAngle)}° / db)
-                    </span>
-                  </div>
-
-                  {/* Interaktív Élő Kerék */}
-                  <div className="relative w-64 h-64 sm:w-72 sm:h-72 rounded-full p-2 bg-neutral-900 border-4 border-neutral-800 shadow-2xl my-2">
-                    {/* Felső kis mutató pozíció */}
-                    <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-20 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[18px] border-t-amber-400" />
-                    <div className="w-full h-full rounded-full overflow-hidden">
-                      {renderWheelSvg(true)}
+                  {/* Fejléc */}
+                  <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <Settings2 className="w-5 h-5 text-amber-400" />
+                      <div>
+                        <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-wider">
+                          Kerék Stúdió & Feladvány-kezelő
+                        </h3>
+                        <p className="text-[11px] text-neutral-400">
+                          Szerkeszd a feladványokat és figyeld az élő előnézetet bal oldalon!
+                        </p>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => setIsEditorOpen(false)}
+                      className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
 
-                  <p className="text-[10px] text-neutral-500 text-center mt-2">
-                    Bármit változtatsz a jobb oldalon, azonnal itt látod a szeletelést és a színeket!
-                  </p>
-                </div>
-
-                {/* JOBB PANEL (7 OSZLOP): FELADVÁNYOK ÉS SZERKESZTŐ */}
-                <div className="lg:col-span-7 flex flex-col gap-4">
-                  
-                  {/* 1. GYORS PRESETEK */}
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-amber-400" /> Kész Kihívás-Csomagok
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {Object.entries(CHALLENGE_PRESETS).map(([key, pack]) => (
-                        <button
-                          key={key}
-                          onClick={() => setCategories(pack.categories)}
-                          className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-400/50 hover:bg-neutral-800/40 text-left transition flex flex-col gap-0.5"
-                        >
-                          <strong className="text-amber-300 font-bold text-xs">{pack.name}</strong>
-                          <span className="text-[10px] text-neutral-500">{pack.categories.length} feladvány</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 2. ÚJ FELADVÁNY HOZZÁADÁSA */}
-                  <form onSubmit={handleAddCustomCategory} className="flex flex-col gap-3 bg-neutral-950 p-3.5 rounded-2xl border border-neutral-800">
-                    <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Plus className="w-3.5 h-3.5 text-amber-400" /> Saját Feladvány / Szabály Hozzáadása
-                    </span>
+                  {/* KÉTPANELES TÁGAS ELRENDEZÉS */}
+                  <div className="flex flex-col md:flex-row items-stretch gap-6">
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        placeholder="Feladvány neve (pl. 2000 Után?)"
-                        value={newLabel}
-                        onChange={(e) => setNewLabel(e.target.value)}
-                        className="bg-neutral-900 text-xs px-3 py-2 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400 font-medium"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Szabály / Pontozási leírás"
-                        value={newDesc}
-                        onChange={(e) => setNewDesc(e.target.value)}
-                        className="bg-neutral-900 text-xs px-3 py-2 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-
-                    {/* Kártya célkijelölés és színválasztó */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-neutral-800/60">
-                      <div className="flex items-center gap-1.5 text-[11px]">
-                        <span className="text-neutral-500 font-bold">Kártya kiemelés:</span>
-                        <select
-                          value={newTargetType}
-                          onChange={(e) => setNewTargetType(e.target.value as TargetHighlight)}
-                          className="bg-neutral-900 text-xs text-white border border-neutral-800 rounded-lg px-2 py-1 focus:outline-none"
-                        >
-                          <option value="year">📅 Évszám</option>
-                          <option value="title">🎵 Dalcím</option>
-                          <option value="artist">🎤 Előadó</option>
-                          <option value="all">✨ Általános</option>
-                        </select>
+                    {/* BAL OLDAL: FIX SZÉLESSÉGŰ ÉLŐ ELŐNÉZET (NEM TUD SZÉTCSÚSZNI) */}
+                    <div className="w-full md:w-[280px] shrink-0 flex flex-col items-center justify-center p-4 rounded-2xl bg-neutral-950 border border-neutral-800/80 shadow-inner">
+                      <div className="flex items-center justify-between w-full mb-2 px-1">
+                        <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" /> Élő Előnézet
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-300">
+                          {categories.length} szelet
+                        </span>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
-                        <Palette className="w-3.5 h-3.5 text-neutral-500" />
-                        <div className="flex items-center gap-1">
-                          {COLOR_PRESETS.map((p, idx) => (
+                      {/* Élő Kerék grafika */}
+                      <div className="relative w-52 h-52 sm:w-60 sm:h-60 rounded-full p-2 bg-neutral-900 border-4 border-neutral-800 shadow-2xl my-2 shrink-0">
+                        <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-20 w-0 h-0 border-l-[9px] border-l-transparent border-r-[9px] border-r-transparent border-t-[16px] border-t-amber-400" />
+                        <div className="w-full h-full rounded-full overflow-hidden">
+                          {renderWheelSvg(true)}
+                        </div>
+                      </div>
+
+                      <span className="text-[10px] text-neutral-500 text-center font-mono mt-1">
+                        {Math.round(sliceAngle)}° / szelet
+                      </span>
+                    </div>
+
+                    {/* JOBB OLDAL: SZERKESZTŐ ÉS CSOMAGOK */}
+                    <div className="flex-1 flex flex-col gap-4 min-w-0">
+                      
+                      {/* 1. Kész Kihívás-csomagok */}
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-amber-400" /> Kész Kihívás-Csomagok
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {Object.entries(CHALLENGE_PRESETS).map(([key, pack]) => (
                             <button
-                              key={p.label}
-                              type="button"
-                              onClick={() => setSelectedColorIdx(idx)}
-                              className={`w-4 h-4 rounded-full transition transform ${
-                                selectedColorIdx === idx ? "scale-125 ring-2 ring-white" : "opacity-70 hover:opacity-100"
-                              }`}
-                              style={{ backgroundColor: p.accent }}
-                            />
+                              key={key}
+                              onClick={() => setCategories(pack.categories)}
+                              className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-400/50 hover:bg-neutral-800/40 text-left transition flex flex-col"
+                            >
+                              <strong className="text-amber-300 font-bold text-xs truncate w-full">{pack.name}</strong>
+                              <span className="text-[10px] text-neutral-500">{pack.categories.length} feladvány</span>
+                            </button>
                           ))}
                         </div>
                       </div>
 
-                      <button
-                        type="submit"
-                        className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs flex items-center gap-1 transition shadow ml-auto"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Beszúrás a kerékre</span>
-                      </button>
-                    </div>
-                  </form>
+                      {/* 2. Új feladvány űrlap */}
+                      <form onSubmit={handleAddCustomCategory} className="flex flex-col gap-2.5 bg-neutral-950 p-3 rounded-2xl border border-neutral-800">
+                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
+                          <Plus className="w-3 h-3 text-amber-400" /> Saját Feladvány Hozzáadása
+                        </span>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Feladvány neve (pl. 2000 Után?)"
+                            value={newLabel}
+                            onChange={(e) => setNewLabel(e.target.value)}
+                            className="bg-neutral-900 text-xs px-3 py-2 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Szabály / Pontozási leírás"
+                            value={newDesc}
+                            onChange={(e) => setNewDesc(e.target.value)}
+                            className="bg-neutral-900 text-xs px-3 py-2 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400"
+                          />
+                        </div>
 
-                  {/* 3. AKTÍV SZELETEK LISTÁJA */}
-                  <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">
-                    {categories.map((cat, idx) => (
-                      <div
-                        key={`${cat.id}-${idx}`}
-                        className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-950 border border-neutral-800/80 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-3.5 h-3.5 rounded-full shadow-sm" style={{ backgroundColor: cat.accent }} />
-                          <div className="flex flex-col">
-                            <span className="font-bold text-white uppercase">{cat.label}</span>
-                            <span className="text-[10px] text-neutral-500">{cat.desc}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-neutral-800/60">
+                          <div className="flex items-center gap-1.5 text-[11px]">
+                            <span className="text-neutral-500 font-bold">Kártya:</span>
+                            <select
+                              value={newTargetType}
+                              onChange={(e) => setNewTargetType(e.target.value as TargetHighlight)}
+                              className="bg-neutral-900 text-xs text-white border border-neutral-800 rounded-lg px-2 py-1 focus:outline-none"
+                            >
+                              <option value="year">📅 Évszám</option>
+                              <option value="title">🎵 Dalcím</option>
+                              <option value="artist">🎤 Előadó</option>
+                              <option value="all">✨ Általános</option>
+                            </select>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1">
+                            <Palette className="w-3.5 h-3.5 text-neutral-500 mr-0.5" />
+                            {COLOR_PRESETS.map((p, idx) => (
+                              <button
+                                key={p.label}
+                                type="button"
+                                onClick={() => setSelectedColorIdx(idx)}
+                                className={`w-4 h-4 rounded-full transition transform ${
+                                  selectedColorIdx === idx ? "scale-125 ring-2 ring-white" : "opacity-70 hover:opacity-100"
+                                }`}
+                                style={{ backgroundColor: p.accent }}
+                              />
+                            ))}
+                          </div>
+
                           <button
-                            onClick={() => {
-                              if (categories.length >= 14) return alert("Maximum 14 szelet engedélyezett!");
-                              setCategories((prev) => [...prev, { ...cat, id: `${cat.id}-${Date.now()}` }]);
-                            }}
-                            className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-amber-300 transition"
-                            title="Duplázás (nagyobb esély erre a feladatra)"
+                            type="submit"
+                            className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs flex items-center gap-1 transition shadow ml-auto"
                           >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (categories.length <= 2) return alert("Legalább 2 szeletnek maradnia kell a keréken!");
-                              setCategories((prev) => prev.filter((_, i) => i !== idx));
-                            }}
-                            className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-rose-400 transition"
-                            title="Törlés"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Beszúrás</span>
                           </button>
                         </div>
+                      </form>
+
+                      {/* 3. Aktív szeletek görgethető listája */}
+                      <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
+                        {categories.map((cat, idx) => (
+                          <div
+                            key={`${cat.id}-${idx}`}
+                            className="flex items-center justify-between p-2 rounded-xl bg-neutral-950 border border-neutral-800/80 text-xs"
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.accent }} />
+                              <div className="flex flex-col truncate">
+                                <span className="font-bold text-white uppercase truncate">{cat.label}</span>
+                                <span className="text-[10px] text-neutral-500 truncate">{cat.desc}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              <button
+                                onClick={() => {
+                                  if (categories.length >= 14) return alert("Maximum 14 szelet engedélyezett!");
+                                  setCategories((prev) => [...prev, { ...cat, id: `${cat.id}-${Date.now()}` }]);
+                                }}
+                                className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-amber-300 transition"
+                                title="Duplázás"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (categories.length <= 2) return alert("Legalább 2 szeletnek maradnia kell!");
+                                  setCategories((prev) => prev.filter((_, i) => i !== idx));
+                                }}
+                                className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-rose-400 transition"
+                                title="Törlés"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
 
-                  {/* Alsó gombsor */}
-                  <div className="flex justify-between items-center pt-2 border-t border-neutral-800 text-xs">
-                    <button
-                      onClick={() => setCategories(CHALLENGE_PRESETS.partyMaster.categories)}
-                      className="text-neutral-500 hover:text-amber-400 flex items-center gap-1.5 transition"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Alaphelyzet visszaállítása</span>
-                    </button>
+                      {/* Alsó gombsor */}
+                      <div className="flex justify-between items-center pt-2 border-t border-neutral-800 text-xs mt-auto">
+                        <button
+                          onClick={() => setCategories(CHALLENGE_PRESETS.partyMaster.categories)}
+                          className="text-neutral-500 hover:text-amber-400 flex items-center gap-1 transition"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Alaphelyzet</span>
+                        </button>
 
-                    <button
-                      onClick={() => setIsEditorOpen(false)}
-                      className="px-6 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black transition"
-                    >
-                      Kész (Mentés)
-                    </button>
+                        <button
+                          onClick={() => setIsEditorOpen(false)}
+                          className="px-6 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black transition"
+                        >
+                          Kész (Mentés)
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               </div>
-            </motion.div>
-          </div>
+            )}
+          </AnimatePresence>,
+          document.body
         )}
-      </AnimatePresence>
     </div>
   );
 };

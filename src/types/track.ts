@@ -3,8 +3,10 @@ export interface Track {
   title: string;
   artist: string;
   year: number;
-  audioUrl: string;
-  coverUrl?: string; // Borítókép támogatás
+  audioUrl?: string;
+  audioFile?: string;
+  coverUrl?: string;
   genre?: string;
-  hint?: string;
+  lyrics?: string;       // Teljes dalszöveg vagy refrén
+  lyricsHint?: string;   // 1-2 sor segítségnek a zene alatt
 }
