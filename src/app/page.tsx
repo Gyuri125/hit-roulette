@@ -21,23 +21,45 @@ import {
   Smartphone, 
   X, 
   Users, 
-  Music2,
-  Tv,
-  Shuffle,
-  CalendarRange,
-  RotateCcw,
-  Lock
+  Music2, 
+  Tv, 
+  Shuffle, 
+  CalendarRange, 
+  RotateCcw, 
+  Lock,
+  Eraser,
+  Zap
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
-// 0 = Végig menjen a zene korlát nélkül
 const TIME_OPTIONS = [15, 30, 45, 60, 0];
 type MusicFilter = "all" | "hungarian" | "international";
+
+// ================= OKOS INTRO SZÁMÍTÓ SEGÉDFÜGGVÉNYEK =================
+const getFirstLyricTime = (lyrics?: string): number => {
+  if (!lyrics) return 0;
+  const match = lyrics.match(/\[(\d{2}):(\d{2})\.?(\d{2,3})?\]/);
+  if (match) {
+    const mins = parseInt(match[1], 10);
+    const secs = parseInt(match[2], 10);
+    const ms = match[3] ? parseInt(match[3].padEnd(3, "0").slice(0, 3), 10) : 0;
+    return mins * 60 + secs + ms / 1000;
+  }
+  return 0;
+};
+
+const getSmartStartTime = (lyrics?: string): number => {
+  const firstTime = getFirstLyricTime(lyrics);
+  // Ha az első sor több mint 6 mp-nél kezdődik, elé ugrunk 5 másodperccel
+  if (firstTime > 6) {
+    return Math.max(0, Math.floor(firstTime - 5));
+  }
+  return 0;
+};
 
 export default function Home() {
   const allTracks: Track[] = tracksData;
 
-  // Abszolút legkisebb és legnagyobb évszám dinamikus detektálása a dalokból
   const { absoluteMinYear, absoluteMaxYear } = React.useMemo(() => {
     const validYears = allTracks
       .map((t) => t.year)
@@ -54,19 +76,17 @@ export default function Home() {
   const [minYear, setMinYear] = useState<number>(absoluteMinYear);
   const [maxYear, setMaxYear] = useState<number>(absoluteMaxYear);
 
-  // Évszám csúszkák határainak szinkronja a betöltött adatokkal
+  // Okos Intro átugrás kapcsoló (alapból BE van kapcsolva)
+  const [smartIntroSkip, setSmartIntroSkip] = useState<boolean>(true);
+
   useEffect(() => {
     setMinYear(absoluteMinYear);
     setMaxYear(absoluteMaxYear);
   }, [absoluteMinYear, absoluteMaxYear]);
 
-  // Szűrt zenei lista (Zenei típus + Évszám határok alapján)
   const filteredTracks = React.useMemo(() => {
     return allTracks.filter((t) => {
-      const isHu =
-        (t as any).language === "hu" ||
-        (t as any).genre?.toLowerCase().includes("magyar") ||
-        /hung|neoton|tnt|omega|bikini|republic|charlie|halott|valmar|edda/i.test(t.artist + t.title);
+      const isHu = (t as any).language === "hu";
 
       if (musicFilter === "hungarian" && !isHu) return false;
       if (musicFilter === "international" && isHu) return false;
@@ -79,7 +99,7 @@ export default function Home() {
     });
   }, [allTracks, musicFilter, minYear, maxYear]);
 
-  // Véletlenszerű pakli-kezelés (string | number kompatibilis azonosítókkal)
+  // Véletlenszerű pakli-kezelés
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playedIds, setPlayedIds] = useState<(string | number)[]>([]);
 
@@ -90,24 +110,22 @@ export default function Home() {
   const [autoPlayCountdown, setAutoPlayCountdown] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"boards" | "game">("boards");
 
-  // Házigazda TV nézetrögzítő
   const [autoSwitchTab, setAutoSwitchTab] = useState(false);
 
-  // Állítható időtartam (0 = Végig)
   const [selectedDuration, setSelectedDuration] = useState<number>(45);
   const [timeLeft, setTimeLeft] = useState<number>(45);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Kártya célkiemelés
+  // Fade In / Fade Out időzítő referencia
+  const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const [guessTarget, setGuessTarget] = useState<GuessTarget>("year");
 
-  // Játékosok listája
   const [players, setPlayers] = useState<PlayerData[]>([
     { id: "host", name: "Házigazda", notes: "", grid: createEmptyGrid(), hasWon: false },
   ]);
   const [activePlayerIdx, setActivePlayerIdx] = useState(0);
 
-  // Multiplayer
   const [roomCode, setRoomCode] = useState<string>("");
   const [isHostModalOpen, setIsHostModalOpen] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
@@ -125,7 +143,58 @@ export default function Home() {
 
   const currentTrack = filteredTracks[currentIndex] || allTracks[0];
 
-  // Véletlenszerű dalválasztó (típustiszta string | number azonosítókkal)
+  // ================= FADE IN & FADE OUT MOTOR =================
+  const stopFadeTimer = () => {
+    if (fadeTimerRef.current) {
+      clearInterval(fadeTimerRef.current);
+      fadeTimerRef.current = null;
+    }
+  };
+
+  const fadeIn = (audio: HTMLAudioElement, targetVol = 1.0, durationMs = 1500) => {
+    stopFadeTimer();
+    try { audio.volume = 0; } catch (_) {}
+    const stepTime = 40;
+    const steps = durationMs / stepTime;
+    const increment = targetVol / steps;
+    let curVol = 0;
+
+    fadeTimerRef.current = setInterval(() => {
+      curVol = Math.min(targetVol, curVol + increment);
+      try { audio.volume = curVol; } catch (_) {}
+      if (curVol >= targetVol) stopFadeTimer();
+    }, stepTime);
+  };
+
+  const fadeOut = (audio: HTMLAudioElement, durationMs = 1200, onDone?: () => void) => {
+    stopFadeTimer();
+    const startVol = audio.volume;
+    if (startVol <= 0.05) {
+      audio.pause();
+      if (onDone) onDone();
+      return;
+    }
+    const stepTime = 40;
+    const steps = durationMs / stepTime;
+    const decrement = startVol / steps;
+    let curVol = startVol;
+
+    fadeTimerRef.current = setInterval(() => {
+      curVol = Math.max(0, curVol - decrement);
+      try { audio.volume = curVol; } catch (_) {}
+      if (curVol <= 0) {
+        stopFadeTimer();
+        audio.pause();
+        try { audio.volume = 1.0; } catch (_) {}
+        if (onDone) onDone();
+      }
+    }, stepTime);
+  };
+
+  useEffect(() => {
+    return () => stopFadeTimer();
+  }, []);
+
   const pickNextRandomIndex = (pool: Track[], currentId?: string | number): number => {
     if (!pool.length) return 0;
     if (pool.length === 1) return 0;
@@ -151,7 +220,7 @@ export default function Home() {
       const rndIdx = Math.floor(Math.random() * filteredTracks.length);
       setCurrentIndex(rndIdx);
       setPlayedIds([filteredTracks[rndIdx].id]);
-      handleStop();
+      handleStop(true);
       setIsFlipped(false);
     }
   }, [musicFilter, minYear, maxYear]);
@@ -250,6 +319,12 @@ export default function Home() {
   }, [roomCode, isJoinedAsClient]);
 
   const handleClientTileClick = (r: number, c: number) => {
+    const willBeMarked = !clientGrid[r][c];
+
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      try { navigator.vibrate(willBeMarked ? 35 : 15); } catch (_) {}
+    }
+
     const newGrid = clientGrid.map((row, rIdx) =>
       row.map((cell, cIdx) => (rIdx === r && cIdx === c ? !cell : cell))
     );
@@ -297,13 +372,14 @@ export default function Home() {
     }
   };
 
+  // Időzítő visszaszámláló: ha lejár -> lágy Fade-Out leállás
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlaying && selectedDuration > 0 && timeLeft > 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
-            handleStop();
+            handleStop(false);
             return 0;
           }
           return prev - 1;
@@ -332,6 +408,7 @@ export default function Home() {
     }
   };
 
+  // Automata indítás a rulett után (Okos kezdéssel + Fade-In)
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (autoPlayCountdown !== null && autoPlayCountdown > 0) {
@@ -341,10 +418,11 @@ export default function Home() {
     } else if (autoPlayCountdown === 0) {
       setAutoPlayCountdown(null);
       if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        setCurrentTime(0);
-        audioRef.current.play();
-        setIsPlaying(true);
+        const smartStart = smartIntroSkip ? getSmartStartTime(currentTrack?.lyrics) : 0;
+        audioRef.current.currentTime = smartStart;
+        setCurrentTime(smartStart);
+        fadeIn(audioRef.current, 1.0, 1500);
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
         setTimeLeft(selectedDuration);
       }
       if (autoSwitchTab) {
@@ -352,47 +430,66 @@ export default function Home() {
       }
     }
     return () => clearTimeout(timer);
-  }, [autoPlayCountdown, selectedDuration, autoSwitchTab]);
+  }, [autoPlayCountdown, selectedDuration, autoSwitchTab, smartIntroSkip, currentTrack]);
 
   const handleSeek = (time: number) => {
     if (audioRef.current) {
       audioRef.current.currentTime = time;
       setCurrentTime(time);
       if (!isPlaying) {
-        audioRef.current.play();
-        setIsPlaying(true);
+        fadeIn(audioRef.current, 1.0, 1000);
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     }
   };
 
   const handleFlipAndShow = () => {
-    if (activeTab !== "game" && autoSwitchTab) setActiveTab("game");
     const nextFlipped = !isFlipped;
     setIsFlipped(nextFlipped);
     if (nextFlipped) {
-      handleStop();
+      handleStop(false);
       confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
     }
   };
 
-  const handleStop = () => {
-    if (audioRef.current) audioRef.current.pause();
-    setIsPlaying(false);
+  // Leállítás Fade-Out opcióval
+  const handleStop = (immediate = false) => {
+    if (!audioRef.current) {
+      setIsPlaying(false);
+      return;
+    }
+    if (immediate) {
+      stopFadeTimer();
+      audioRef.current.pause();
+      try { audioRef.current.volume = 1.0; } catch (_) {}
+      setIsPlaying(false);
+    } else {
+      fadeOut(audioRef.current, 1200, () => {
+        setIsPlaying(false);
+      });
+    }
   };
 
+  // Lejátszás ki/bekapcsolása (Okos kezdéssel + Fade-In)
   const handlePlayToggle = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
-      handleStop();
+      handleStop(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      const audio = audioRef.current;
+      if (audio.currentTime === 0 && smartIntroSkip) {
+        const smartStart = getSmartStartTime(currentTrack?.lyrics);
+        audio.currentTime = smartStart;
+        setCurrentTime(smartStart);
+      }
+      fadeIn(audio, 1.0, 1500);
+      audio.play().then(() => setIsPlaying(true)).catch(() => {});
     }
   };
 
   const handleNextTrack = () => {
     setIsFlipped(false);
-    handleStop();
+    handleStop(true);
     setAutoPlayCountdown(null);
     setTimeLeft(selectedDuration);
 
@@ -400,8 +497,10 @@ export default function Home() {
     setCurrentIndex(nextIdx);
 
     if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      setCurrentTime(0);
+      const nextTrack = filteredTracks[nextIdx];
+      const smartStart = smartIntroSkip ? getSmartStartTime(nextTrack?.lyrics) : 0;
+      audioRef.current.currentTime = smartStart;
+      setCurrentTime(smartStart);
     }
   };
 
@@ -451,6 +550,7 @@ export default function Home() {
             </div>
           </header>
 
+          {/* TELEFONOS FELADVÁNY EMLÉKEZTETŐ SÁV */}
           {activeCategory && (
             <div
               className="w-full max-w-xs py-2 px-3 rounded-2xl border text-center font-black text-xs uppercase tracking-wider my-2 shadow-lg transition-all animate-pulse"
@@ -474,10 +574,14 @@ export default function Home() {
                       <button
                         key={`${r}-${c}`}
                         onClick={() => handleClientTileClick(r, c)}
-                        className="aspect-square rounded-lg flex items-center justify-center font-black text-2xl text-neutral-950 shadow active:scale-90 transition"
+                        className="aspect-square rounded-xl flex items-center justify-center relative shadow select-none active:scale-90 transition overflow-hidden"
                         style={{ backgroundColor: tileColors[(r + c) % tileColors.length] }}
                       >
-                        {isMarked ? "✕" : ""}
+                        {isMarked && (
+                          <span className="font-black text-2xl text-neutral-950 select-none animate-in zoom-in-50 duration-150">
+                            ✕
+                          </span>
+                        )}
                       </button>
                     );
                   })
@@ -486,9 +590,20 @@ export default function Home() {
             </div>
 
             <div className="w-full bg-neutral-100 rounded-2xl p-3 shadow-inner border border-neutral-300 flex flex-col">
-              <span className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider mb-1">
-                Fehértábla (Tippjeid a TV-re szinkronizálva):
-              </span>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider">
+                  Fehértábla (TV-re szinkronizálva):
+                </span>
+                {clientNotes && (
+                  <button
+                    onClick={() => handleClientNotesChange("")}
+                    className="flex items-center gap-1 text-[10px] font-bold text-neutral-500 hover:text-rose-600 transition"
+                  >
+                    <Eraser className="w-3 h-3 text-rose-500" />
+                    <span>Törlés</span>
+                  </button>
+                )}
+              </div>
               <textarea
                 value={clientNotes}
                 onChange={(e) => handleClientNotesChange(e.target.value)}
@@ -507,6 +622,7 @@ export default function Home() {
       ) : (
         /* ==================== TV / LAPTOP FŐOLDAL ==================== */
         <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-3 sm:p-6 select-none">
+          {/* FEJLÉC */}
           <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-3 border-b border-neutral-800/80 gap-3">
             <div>
               <h1 className="text-xl sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
@@ -537,6 +653,21 @@ export default function Home() {
                   <span>Rulett & Kártya</span>
                 </button>
               </div>
+
+              {/* HÁZIGAZDA OKOS INTRO KAPCSOLÓ */}
+              <button
+                onClick={() => setSmartIntroSkip((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  smartIntroSkip
+                    ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="Ha be van kapcsolva, a dal az első szöveges rész előtt 5 másodperccel indul (fade-in-nel)"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Okos Intro:</span>
+                <span>{smartIntroSkip ? "BE (-5s)" : "KI (0s)"}</span>
+              </button>
 
               <button
                 onClick={() => setAutoSwitchTab((prev) => !prev)}
@@ -599,6 +730,7 @@ export default function Home() {
             </div>
           </header>
 
+          {/* SZŰRŐSÁV */}
           <div className="w-full max-w-6xl flex flex-col gap-2.5 py-2.5 px-2 bg-neutral-900/40 border border-neutral-800/80 rounded-2xl my-2 backdrop-blur-md">
             <div className="w-full flex flex-wrap justify-between items-center gap-2 text-xs">
               <div className="flex items-center gap-1.5 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800">
@@ -705,9 +837,19 @@ export default function Home() {
             </div>
           </div>
 
+          {/* AUDIO LEJÁTSZÓ ÉLŐ IDŐKÖVETÉSSEL ÉS MEGBÍZHATÓ INTRO BEÁLLÍTÁSSAL */}
           <audio
             ref={audioRef}
             src={currentTrack?.audioUrl}
+            onLoadedMetadata={() => {
+              if (audioRef.current && smartIntroSkip) {
+                const smartStart = getSmartStartTime(currentTrack?.lyrics);
+                if (smartStart > 0) {
+                  audioRef.current.currentTime = smartStart;
+                  setCurrentTime(smartStart);
+                }
+              }
+            }}
             onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
             onEnded={() => {
               setIsPlaying(false);
@@ -722,7 +864,33 @@ export default function Home() {
             </div>
           )}
 
-          <div className="w-full flex justify-center items-center my-auto py-4">
+          {/* FŐ TARTALOM: KÖZPONTI FELADVÁNY MINDEN NÉZETBEN */}
+          <div className="w-full flex flex-col items-center my-auto py-2">
+            
+            {activeCategory && (
+              <div
+                className="flex items-center gap-3 px-6 py-2.5 rounded-2xl border-2 backdrop-blur-md shadow-2xl mb-4 transition-all animate-pulse"
+                style={{
+                  backgroundColor: `${activeCategory.accent}20`,
+                  borderColor: activeCategory.accent,
+                  boxShadow: `0 0 30px ${activeCategory.accent}35`,
+                }}
+              >
+                <Sparkles className="w-5 h-5 shrink-0" style={{ color: activeCategory.accent }} />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-400">
+                    Aktív Szabály:
+                  </span>
+                  <span className="text-sm sm:text-base font-black uppercase tracking-wide" style={{ color: activeCategory.accent }}>
+                    {activeCategory.label}
+                  </span>
+                  <span className="text-xs text-neutral-300 font-mono hidden sm:inline">
+                    ({activeCategory.desc})
+                  </span>
+                </div>
+              </div>
+            )}
+
             {activeTab === "boards" ? (
               <PlayerBoard
                 players={players}
@@ -737,26 +905,10 @@ export default function Home() {
                   }, 200);
                 }}
                 isPlayingMusic={isPlaying}
+                activeCategory={activeCategory}
               />
             ) : (
               <div className="w-full max-w-5xl flex flex-col items-center gap-6">
-                {activeCategory && (
-                  <div
-                    className="flex items-center gap-2.5 px-5 py-2 rounded-2xl border backdrop-blur-md shadow-lg"
-                    style={{
-                      backgroundColor: `${activeCategory.accent}15`,
-                      borderColor: activeCategory.accent,
-                    }}
-                  >
-                    <Sparkles className="w-4 h-4" style={{ color: activeCategory.accent }} />
-                    <span className="text-xs font-bold text-neutral-300">Aktív szabály:</span>
-                    <span className="text-xs font-black uppercase tracking-wide" style={{ color: activeCategory.accent }}>
-                      {activeCategory.label}
-                    </span>
-                    <span className="text-[11px] text-neutral-400 font-mono">({activeCategory.desc})</span>
-                  </div>
-                )}
-
                 <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-center justify-items-center">
                   <div className="flex flex-col items-center justify-center p-6 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full max-w-md shadow-2xl">
                     <RouletteWheel onSpinEnd={handleSpinEnd} />
@@ -787,6 +939,7 @@ export default function Home() {
             )}
           </div>
 
+          {/* ALSÓ VEZÉRLŐSÁV */}
           <footer className="w-full max-w-lg bg-neutral-900/80 backdrop-blur-lg border border-neutral-800 rounded-3xl p-3 flex items-center justify-between shadow-2xl mb-1">
             <button
               onClick={handlePlayToggle}
@@ -796,13 +949,16 @@ export default function Home() {
               <span>{isPlaying ? "Szünet" : "Zene"}</span>
             </button>
 
-            <button
-              onClick={handleFlipAndShow}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs sm:text-sm border border-neutral-700 transition active:scale-95 shadow-md"
-            >
-              <Eye className="w-4 h-4 text-amber-400" />
-              <span>{isFlipped ? "Elrejtés" : "Megfordítás (Space)"}</span>
-            </button>
+            {/* A MEGFORDÍTÁS GOMB KIZÁRÓLAG A KÁRTYA NÉZETBEN JELENIK MEG */}
+            {activeTab === "game" && (
+              <button
+                onClick={handleFlipAndShow}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs sm:text-sm border border-neutral-700 transition active:scale-95 shadow-md"
+              >
+                <Eye className="w-4 h-4 text-amber-400" />
+                <span>{isFlipped ? "Elrejtés" : "Megfordítás (Space)"}</span>
+              </button>
+            )}
 
             <button
               onClick={handleNextTrack}
@@ -814,6 +970,7 @@ export default function Home() {
             </button>
           </footer>
 
+          {/* TV QR KÓD MODAL */}
           {isHostModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
               <div className="w-full max-w-sm bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-4 text-center">
@@ -857,6 +1014,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* JÁTÉKOS BELÉPŐ MODAL */}
           {isJoinModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
               <div className="w-full max-w-xs bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-5 shadow-2xl flex flex-col items-center gap-4 text-center">

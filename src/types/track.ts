@@ -7,6 +7,7 @@ export interface Track {
   audioFile?: string;
   coverUrl?: string;
   genre?: string;
-  lyrics?: string;       // Teljes dalszöveg vagy refrén
-  lyricsHint?: string;   // 1-2 sor segítségnek a zene alatt
+  language?: "hu" | "en" | string; // <-- "hu" (magyar) vagy "en" (nemzetközi)
+  lyrics?: string;                  // Teljes dalszöveg vagy LRC formátum
+  lyricsHint?: string;              // 1-2 sor segítségnek a zene alatt
 }
