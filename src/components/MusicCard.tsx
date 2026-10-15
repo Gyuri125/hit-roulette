@@ -45,6 +45,7 @@ interface MusicCardProps {
   currentTime?: number;
   onSeek?: (time: number) => void;
   isPlaying?: boolean;
+  accentColor?: string;
 }
 
 export const MusicCard: React.FC<MusicCardProps> = ({
@@ -55,13 +56,32 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   currentTime = 0,
   onSeek,
   isPlaying = false,
+  accentColor = "#f59e0b",
 }) => {
   const [showFrontLyrics, setShowFrontLyrics] = useState(true);
+  const [eqBars, setEqBars] = useState<number[]>(Array(20).fill(15));
 
   const frontContainerRef = useRef<HTMLDivElement | null>(null);
   const backContainerRef = useRef<HTMLDivElement | null>(null);
   const frontLyricsRef = useRef<HTMLParagraphElement | null>(null);
   const backLyricsRef = useRef<HTMLParagraphElement | null>(null);
+
+  // Kártyán belüli Neon Audio Visualizer animáció
+  useEffect(() => {
+    if (!isPlaying) {
+      setEqBars(Array(20).fill(12));
+      return;
+    }
+    const interval = setInterval(() => {
+      setEqBars(
+        Array.from({ length: 20 }, (_, i) => {
+          const centerWeight = 1 - Math.abs(i - 9.5) / 11;
+          return Math.max(15, Math.min(100, Math.floor((Math.random() * 75 + 25) * centerWeight)));
+        })
+      );
+    }, 110);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
 
   const parsedLyrics = useMemo(() => {
     return parseLrc(track.lyrics || "");
@@ -119,6 +139,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       onClick={onFlip}
       className="relative w-[310px] sm:w-[370px] h-[510px] sm:h-[580px] cursor-pointer select-none perspective-[1400px]"
     >
+      {/* Basszusra lüktető neon aura a kártya mögött */}
+      {isPlaying && (
+        <div
+          className="absolute -inset-3 rounded-[42px] blur-2xl opacity-35 transition-all duration-300 pointer-events-none animate-pulse"
+          style={{ backgroundColor: accentColor }}
+        />
+      )}
+
       <motion.div
         className="w-full h-full relative"
         initial={false}
@@ -128,24 +156,26 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       >
         {/* ===================== ELŐLAP =========================== */}
         <div
-          className="absolute inset-0 w-full h-full rounded-[34px] bg-gradient-to-b from-neutral-900 via-neutral-950 to-neutral-950 border-2 border-neutral-800/90 p-5 flex flex-col justify-between shadow-[0_25px_60px_rgba(0,0,0,0.85)] backdrop-blur-xl overflow-hidden"
+          className="absolute inset-0 w-full h-full rounded-[34px] bg-gradient-to-b from-neutral-900 via-neutral-950 to-neutral-950 border-2 p-5 flex flex-col justify-between shadow-[0_25px_60px_rgba(0,0,0,0.85)] backdrop-blur-xl overflow-hidden transition-colors duration-500"
           style={{
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            borderColor: isPlaying ? `${accentColor}80` : "#262626",
+            boxShadow: isPlaying ? `0 0 35px ${accentColor}25` : undefined,
           }}
         >
           <div className="flex justify-between items-center z-10">
             <div className="flex items-center gap-2">
-              <span className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-extrabold uppercase tracking-wider text-[11px]">
+              <span
+                className="px-3 py-1 rounded-full border font-extrabold uppercase tracking-wider text-[11px]"
+                style={{
+                  backgroundColor: `${accentColor}15`,
+                  borderColor: `${accentColor}40`,
+                  color: accentColor,
+                }}
+              >
                 Hitster Kártya
               </span>
-              {isPlaying && (
-                <span className="flex items-end gap-0.5 h-3.5 px-1">
-                  <span className="w-1 bg-amber-400 rounded-full animate-[bounce_0.6s_infinite] h-3" />
-                  <span className="w-1 bg-rose-400 rounded-full animate-[bounce_0.8s_infinite] h-2" />
-                  <span className="w-1 bg-cyan-400 rounded-full animate-[bounce_0.5s_infinite] h-3.5" />
-                </span>
-              )}
             </div>
 
             {track.lyrics && (
@@ -167,11 +197,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             )}
           </div>
 
-          <div className="flex flex-col items-center justify-center my-auto w-full gap-2.5">
+          <div className="flex flex-col items-center justify-center my-auto w-full gap-2.5 z-10">
             {showFrontLyrics && track.lyrics ? (
               <div className="w-full flex flex-col items-center">
                 <div className="flex items-center gap-2 mb-2 text-neutral-400">
-                  <Disc3 className={`w-4 h-4 text-amber-400 ${isPlaying ? "animate-[spin_4s_linear_infinite]" : ""}`} />
+                  <Disc3
+                    className={`w-4 h-4 ${isPlaying ? "animate-[spin_4s_linear_infinite]" : ""}`}
+                    style={{ color: accentColor }}
+                  />
                   <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400">
                     {isSynced ? "Énekelj velünk! (Kattints a sorra)" : "Dalszöveg (Olvasó mód)"}
                   </span>
@@ -179,7 +212,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
 
                 <div
                   ref={frontContainerRef}
-                  className="w-full h-60 sm:h-72 bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_12%,black_88%,transparent_100%)] flex flex-col gap-3 py-6"
+                  className="w-full h-56 sm:h-68 bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_12%,black_88%,transparent_100%)] flex flex-col gap-3 py-6"
                 >
                   {parsedLyrics.map((line, idx) => {
                     const isActive = isSynced && idx === activeIndex;
@@ -208,11 +241,23 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             ) : (
               <div className="flex flex-col items-center gap-4 py-6">
                 <div className="relative w-32 h-32 sm:w-40 sm:h-40 flex items-center justify-center">
-                  <div className="absolute inset-0 rounded-full bg-amber-500/15 blur-2xl animate-pulse" />
+                  <div
+                    className="absolute inset-0 rounded-full blur-2xl animate-pulse"
+                    style={{ backgroundColor: `${accentColor}25` }}
+                  />
                   <div className="relative w-full h-full rounded-full bg-neutral-950 border-4 border-neutral-800 flex items-center justify-center shadow-2xl">
                     <div className="w-20 h-20 sm:w-28 sm:h-28 rounded-full border border-neutral-800 flex items-center justify-center">
-                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
-                        <Disc3 className={`w-6 h-6 sm:w-8 sm:h-8 text-amber-400 ${isPlaying ? "animate-[spin_4s_linear_infinite]" : ""}`} />
+                      <div
+                        className="w-12 h-12 sm:w-16 sm:h-16 rounded-full border flex items-center justify-center"
+                        style={{
+                          backgroundColor: `${accentColor}20`,
+                          borderColor: `${accentColor}50`,
+                        }}
+                      >
+                        <Disc3
+                          className={`w-6 h-6 sm:w-8 sm:h-8 ${isPlaying ? "animate-[spin_4s_linear_infinite]" : ""}`}
+                          style={{ color: accentColor }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -230,8 +275,25 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             )}
           </div>
 
-          <div className="text-center text-[10px] uppercase font-extrabold tracking-widest text-neutral-500 pt-1">
-            Kattints vagy nyomj Space-t a felfedéshez ↷
+          {/* KÁRTYA ALJA: NEON SPEKTRUM ANALIZÁTOR SÁV */}
+          <div className="w-full flex flex-col items-center gap-1.5 z-10">
+            <div className="w-full h-7 flex items-end justify-center gap-1 px-2">
+              {eqBars.map((height, idx) => (
+                <div
+                  key={idx}
+                  className="flex-1 rounded-t-full transition-all duration-100"
+                  style={{
+                    height: `${isPlaying ? height : 12}%`,
+                    backgroundColor: accentColor,
+                    opacity: isPlaying ? 0.85 : 0.2,
+                    boxShadow: isPlaying ? `0 0 8px ${accentColor}` : "none",
+                  }}
+                />
+              ))}
+            </div>
+            <div className="text-center text-[10px] uppercase font-extrabold tracking-widest text-neutral-500">
+              Kattints vagy nyomj Space-t a felfedéshez ↷
+            </div>
           </div>
         </div>
 
