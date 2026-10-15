@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { Lock, ShieldAlert, KeyRound, ArrowRight } from "lucide-react";
 
 const MASTER_PIN = "303646";
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1000; // 4 óra milliszekundumban
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const STORAGE_KEY = "hit_pin_auth_time";
 
-// Globálisan meghívható azonnali visszazáró függvény
 export const lockPinGate = () => {
   if (typeof window !== "undefined") {
     localStorage.removeItem(STORAGE_KEY);
@@ -25,8 +25,8 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
   const [failedAttempts, setFailedAttempts] = useState<number>(0);
   const [lockTimeLeft, setLockTimeLeft] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [shake, setShake] = useState(false);
 
-  // 4 órás érvényesség ellenőrzése
   const checkValidity = () => {
     if (typeof window === "undefined") return;
     const authTimeStr = localStorage.getItem(STORAGE_KEY);
@@ -36,10 +36,7 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
     }
 
     const authTime = parseInt(authTimeStr, 10);
-    const now = Date.now();
-
-    // Ha eltelt a 4 óra -> Automatikus visszazárás
-    if (now - authTime > FOUR_HOURS_MS) {
+    if (Date.now() - authTime > FOUR_HOURS_MS) {
       localStorage.removeItem(STORAGE_KEY);
       setIsUnlocked(false);
     } else {
@@ -49,11 +46,7 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
 
   useEffect(() => {
     checkValidity();
-
-    // Percenkénti automata ellenőrzés (a 4 óra leteltének figyelésére)
     const interval = setInterval(checkValidity, 60000);
-
-    // Kézi zárolási esemény figyelése
     const handleLockEvent = () => setIsUnlocked(false);
     window.addEventListener("pingate:lock", handleLockEvent);
 
@@ -63,7 +56,6 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
     };
   }, []);
 
-  // Visszaszámláló a hibás próbálkozások büntetőidejéhez
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (lockTimeLeft > 0) {
@@ -79,34 +71,37 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
     if (lockTimeLeft > 0) return;
 
     if (pinInput.trim() === MASTER_PIN) {
-      // Sikeres feloldás: időbélyeg mentése
       localStorage.setItem(STORAGE_KEY, Date.now().toString());
       setIsUnlocked(true);
       setErrorMsg("");
       setFailedAttempts(0);
       setPinInput("");
     } else {
-      // Hibás kód: Négyzetes büntetés (próbálkozások száma ^ 2 másodperc)
       const nextAttempts = failedAttempts + 1;
       setFailedAttempts(nextAttempts);
       const penaltySeconds = Math.pow(nextAttempts, 2);
       setLockTimeLeft(penaltySeconds);
-      setErrorMsg(`Hibás PIN! Rendszer zárolva: ${penaltySeconds} másodpercre.`);
+      setErrorMsg(`Hibás PIN! Zárolva: ${penaltySeconds} másodpercre.`);
       setPinInput("");
+      setShake(true);
+      setTimeout(() => setShake(false), 450);
     }
   };
 
-  // Betöltési villanás megelőzése
   if (isUnlocked === null) {
     return <div className="min-h-screen bg-neutral-950" />;
   }
 
-  // Zárolt állapot -> PIN bekérő képernyő
   if (!isUnlocked) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-4 select-none">
-        <div className="w-full max-w-sm bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-5 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner">
+      <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-4 select-none relative overflow-hidden">
+        <div className="absolute w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+        <motion.div
+          animate={shake ? { x: [-10, 10, -8, 8, -4, 4, 0] } : {}}
+          transition={{ duration: 0.4 }}
+          className="relative z-10 w-full max-w-sm bg-neutral-900/90 backdrop-blur-xl border-2 border-neutral-800 rounded-[32px] p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] flex flex-col items-center gap-5 text-center"
+        >
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/20 to-rose-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner">
             {lockTimeLeft > 0 ? (
               <ShieldAlert className="w-8 h-8 text-rose-500 animate-pulse" />
             ) : (
@@ -115,7 +110,7 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
           </div>
 
           <div>
-            <h2 className="text-xl font-black uppercase tracking-wider text-white">
+            <h2 className="text-xl font-black uppercase tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-300 to-white">
               Hit-Roulette Védelem
             </h2>
             <p className="text-xs text-neutral-400 mt-1">
@@ -123,7 +118,7 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="w-full flex flex-col gap-3">
+          <form onSubmit={handleSubmit} className="w-full flex flex-col gap-4">
             <div className="relative w-full">
               <KeyRound className="w-5 h-5 absolute left-3.5 top-1/2 transform -translate-y-1/2 text-neutral-500 pointer-events-none" />
               <input
@@ -137,13 +132,27 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
                   setErrorMsg("");
                   setPinInput(e.target.value.replace(/\D/g, ""));
                 }}
-                className="w-full bg-neutral-950 border border-neutral-800 focus:border-amber-400 text-center text-xl font-mono tracking-[0.4em] py-3 pl-10 pr-4 rounded-xl text-white focus:outline-none disabled:opacity-40 transition"
+                className="w-full bg-neutral-950 border-2 border-neutral-800 focus:border-amber-400 text-center text-2xl font-mono tracking-[0.45em] py-3.5 pl-10 pr-4 rounded-2xl text-white focus:outline-none disabled:opacity-40 transition shadow-inner"
                 autoFocus
               />
             </div>
 
+            {/* Vizuális 6-pontos állapotjelző */}
+            <div className="flex justify-center gap-2">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                    idx < pinInput.length
+                      ? "bg-amber-400 scale-125 shadow-[0_0_8px_#fbbf24]"
+                      : "bg-neutral-800"
+                  }`}
+                />
+              ))}
+            </div>
+
             {errorMsg && (
-              <p className="text-xs text-rose-400 font-bold leading-tight">
+              <p className="text-xs text-rose-400 font-bold leading-tight bg-rose-500/10 border border-rose-500/30 py-2 px-3 rounded-xl">
                 {lockTimeLeft > 0 ? `⏳ Újrapróbálás: ${lockTimeLeft} mp múlva` : errorMsg}
               </p>
             )}
@@ -151,18 +160,18 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
             <button
               type="submit"
               disabled={lockTimeLeft > 0 || pinInput.length < 6}
-              className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-neutral-800 disabled:text-neutral-500 text-neutral-950 font-black text-xs uppercase tracking-widest transition shadow-lg flex items-center justify-center gap-2 active:scale-95"
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 disabled:from-neutral-800 disabled:to-neutral-800 disabled:text-neutral-500 text-neutral-950 font-black text-xs uppercase tracking-widest transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 active:scale-95"
             >
               <span>{lockTimeLeft > 0 ? `Zárolva (${lockTimeLeft}s)` : "Belépés"}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          <div className="flex flex-col gap-0.5 text-[10px] text-neutral-600 font-mono">
-            <span>Anti-Brute-Force védelem aktív</span>
-            <span>4 óra inaktivitás után automatikusan visszazár</span>
+          <div className="flex flex-col gap-0.5 text-[10px] text-neutral-500 font-mono pt-1 border-t border-neutral-800/80 w-full">
+            <span>🛡️ Anti-Brute-Force védelem aktív</span>
+            <span>⏱️ 4 óra után automatikusan visszazár</span>
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }

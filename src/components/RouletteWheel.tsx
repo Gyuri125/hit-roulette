@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette, Volume2 } from "lucide-react";
+import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette } from "lucide-react";
 import confetti from "canvas-confetti";
 
 export type TargetHighlight = "year" | "title" | "artist" | "all";
@@ -23,7 +23,6 @@ export interface PresetPack {
   categories: Category[];
 }
 
-// 🎯 A TÁBLÁZAT 5 HIVATALOS SZÍNÉVEL ÖSSZEHANGOLT ALAPKATEGÓRIÁK
 export const CATEGORIES: Category[] = [
   {
     id: "year",
@@ -118,7 +117,6 @@ const splitLabelToLines = (text: string): [string, string] => {
   return [parts.slice(0, mid).join(" ").toUpperCase(), parts.slice(mid).join(" ").toUpperCase()];
 };
 
-// ================= HANGEFFEKT SZINTETIZÁTOR (Web Audio API) =================
 const playClickTone = (audioCtx: AudioContext) => {
   try {
     const osc = audioCtx.createOscillator();
@@ -137,7 +135,7 @@ const playClickTone = (audioCtx: AudioContext) => {
 
 const playFanfareTone = (audioCtx: AudioContext) => {
   try {
-    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 (Győzelmi akkord)
+    const notes = [523.25, 659.25, 783.99, 1046.50];
     notes.forEach((freq, idx) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -160,13 +158,10 @@ interface RouletteWheelProps {
 }
 
 export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
-  // Alapértelmezettként a táblázat 5 színe aktív!
   const [categories, setCategories] = useState<Category[]>(CATEGORIES);
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [winner, setWinner] = useState<Category | null>(null);
-
-  // Disco animáció villogó állapota
   const [discoStep, setDiscoStep] = useState(0);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -176,7 +171,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
     setMounted(true);
   }, []);
 
-  // Disco villogó lépések pörgés közben
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isSpinning) {
@@ -187,7 +181,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
     return () => clearInterval(interval);
   }, [isSpinning]);
 
-  // GUI Studio Állapotok
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -200,7 +193,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   const spin = () => {
     if (isSpinning || categories.length === 0) return;
 
-    // Web Audio inicializálás
     if (!audioCtxRef.current) {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtxClass) audioCtxRef.current = new AudioCtxClass();
@@ -224,7 +216,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
 
     setRotation(finalRotation);
 
-    // Kerepelő kattogó hangok szimulációja lassuló ütemben
     if (audioCtxRef.current) {
       const delays = [
         60, 110, 160, 210, 260, 310, 360, 420, 480, 550, 630, 720, 820, 930, 1050, 1200, 1400, 1650, 1950, 2300, 2700, 3150, 3650
@@ -360,12 +351,14 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   const discoColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
 
   return (
-    <div className="flex flex-col items-center gap-5 w-full max-w-md select-none">
-      {/* NAGY KERÉK TEST + DISCO LED ÉS FÉNYHATÁSOK */}
-      <div className="relative w-80 h-80 sm:w-96 sm:h-96 flex items-center justify-center">
-        {/* Disco pulzáló háttérköd */}
+    <div className="flex flex-col items-center gap-4 w-full max-w-md select-none">
+      <div
+        onClick={spin}
+        className="relative w-72 h-72 sm:w-84 sm:h-84 lg:w-92 lg:h-92 flex items-center justify-center cursor-pointer group"
+        title="Kattints a kerékre a pörgetéshez!"
+      >
         <div
-          className="absolute inset-0 rounded-full blur-3xl transition-all duration-300"
+          className="absolute inset-0 rounded-full blur-3xl transition-all duration-300 pointer-events-none"
           style={{
             backgroundColor: isSpinning
               ? `${discoColors[discoStep]}45`
@@ -376,7 +369,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
           }}
         />
 
-        {/* Felső nyíl mutató */}
         <div className="absolute -top-4 z-30 flex flex-col items-center drop-shadow-[0_10px_15px_rgba(0,0,0,0.9)]">
           <motion.div
             animate={isSpinning ? { rotate: [0, -14, 12, -8, 0] } : { rotate: 0 }}
@@ -386,8 +378,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
           <div className="w-3.5 h-3.5 rounded-full bg-amber-200 border-2 border-neutral-900 -mt-7" />
         </div>
 
-        {/* Keréktest és a 24 db Disco LED pont */}
-        <div className="relative w-full h-full rounded-full p-2.5 bg-neutral-900 border-4 border-neutral-800 shadow-[0_0_50px_rgba(0,0,0,0.95)]">
+        <div className="relative w-full h-full rounded-full p-2.5 bg-neutral-900 border-4 border-neutral-800 shadow-[0_0_50px_rgba(0,0,0,0.95)] group-hover:border-neutral-700 transition">
           {Array.from({ length: 24 }).map((_, i) => {
             const angle = (360 / 24) * i;
             const ledColor = isSpinning
@@ -401,7 +392,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
             return (
               <div
                 key={i}
-                className="absolute w-2.5 h-2.5 rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-all duration-150 z-20"
+                className="absolute w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-all duration-150 z-20"
                 style={{
                   top: `${50 - 47.5 * Math.cos((angle * Math.PI) / 180)}%`,
                   left: `${50 + 47.5 * Math.sin((angle * Math.PI) / 180)}%`,
@@ -426,58 +417,54 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
         </div>
       </div>
 
-      {/* PÖRGETŐ ÉS STÚDIÓ GOMB */}
-      <div className="flex items-center gap-3 w-full justify-center">
+      <div className="flex items-center gap-2.5 w-full justify-center">
         <button
           id="roulette-spin-btn"
           onClick={spin}
           disabled={isSpinning}
-          className="group relative flex-1 max-w-xs px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-violet-600 p-[2px] transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_25px_rgba(245,158,11,0.3)] hover:shadow-[0_0_35px_rgba(236,72,153,0.5)]"
+          className="group relative flex-1 max-w-xs px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-violet-600 p-[2px] transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_25px_rgba(245,158,11,0.3)] hover:shadow-[0_0_35px_rgba(236,72,153,0.5)]"
         >
-          <div className="flex items-center justify-center gap-2.5 px-4 py-2 rounded-[14px] bg-neutral-950/90 group-hover:bg-neutral-950/70 transition">
+          <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-[14px] bg-neutral-950/90 group-hover:bg-neutral-950/70 transition">
             <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
             <span className="text-xs sm:text-sm font-black tracking-widest uppercase bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-300 to-white">
-              {isSpinning ? "DISCO PÖRGÉS..." : "RULETT PÖRGETÉS"}
+              {isSpinning ? "DISCO PÖRGÉS..." : "RULETT PÖRGETÉS (R)"}
             </span>
           </div>
         </button>
 
         <button
           onClick={() => setIsEditorOpen(true)}
-          className="p-3.5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition active:scale-95 shadow-lg"
+          className="p-3 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition active:scale-95 shadow-lg"
           title="Kerék Stúdió & Feladványok szerkesztése"
         >
           <Settings2 className="w-5 h-5" />
         </button>
       </div>
 
-      {/* NYERTES KIJELZÉS */}
       <AnimatePresence>
         {winner && (
           <motion.div
             initial={{ opacity: 0, scale: 0.85, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85 }}
-            className="flex items-center gap-3 px-5 py-3 rounded-2xl border-2 backdrop-blur-md shadow-2xl text-left"
+            className="flex items-center gap-3 px-4 py-2.5 rounded-2xl border-2 backdrop-blur-md shadow-2xl text-left"
             style={{
               backgroundColor: `${winner.accent}15`,
               borderColor: winner.accent,
               boxShadow: `0 0 25px ${winner.accent}40`,
             }}
           >
-            <Trophy className="w-6 h-6 shrink-0" style={{ color: winner.accent }} />
+            <Trophy className="w-5 h-5 shrink-0" style={{ color: winner.accent }} />
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">Kipörgetett Feladvány:</span>
-              <span className="text-sm font-black uppercase tracking-wide" style={{ color: winner.accent }}>
-                {winner.label}
+              <span className="text-xs sm:text-sm font-black uppercase tracking-wide" style={{ color: winner.accent }}>
+                {winner.label} — {winner.desc}
               </span>
-              <span className="text-[11px] text-neutral-300">{winner.desc}</span>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ================= REACT PORTAL STÚDIÓ ================= */}
       {mounted &&
         createPortal(
           <AnimatePresence>
@@ -489,7 +476,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                   exit={{ scale: 0.95, opacity: 0 }}
                   className="w-full max-w-4xl bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col gap-5 my-auto max-h-[92vh] overflow-y-auto"
                 >
-                  {/* Fejléc */}
                   <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
                     <div className="flex items-center gap-2.5">
                       <Settings2 className="w-5 h-5 text-amber-400" />
@@ -498,7 +484,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                           Kerék Stúdió & Feladvány-kezelő
                         </h3>
                         <p className="text-[11px] text-neutral-400">
-                          Szerkeszd a feladványokat és figyeld az élő előnézetet bal oldalon!
+                          Szerkeszd a feladványokat és figyeld az élő előnézetet!
                         </p>
                       </div>
                     </div>
@@ -511,8 +497,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                   </div>
 
                   <div className="flex flex-col md:flex-row items-stretch gap-6">
-                    {/* BAL OLDAL: ÉLŐ ELŐNÉZET */}
-                    <div className="w-full md:w-[280px] shrink-0 flex flex-col items-center justify-center p-4 rounded-2xl bg-neutral-950 border border-neutral-800/80 shadow-inner">
+                    <div className="w-full md:w-[260px] shrink-0 flex flex-col items-center justify-center p-4 rounded-2xl bg-neutral-950 border border-neutral-800/80 shadow-inner">
                       <div className="flex items-center justify-between w-full mb-2 px-1">
                         <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                           <Sparkles className="w-3.5 h-3.5" /> Élő Előnézet
@@ -522,24 +507,18 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                         </span>
                       </div>
 
-                      <div className="relative w-52 h-52 sm:w-60 sm:h-60 rounded-full p-2 bg-neutral-900 border-4 border-neutral-800 shadow-2xl my-2 shrink-0">
+                      <div className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-full p-2 bg-neutral-900 border-4 border-neutral-800 shadow-2xl my-2 shrink-0">
                         <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-20 w-0 h-0 border-l-[9px] border-l-transparent border-r-[9px] border-r-transparent border-t-[16px] border-t-amber-400" />
                         <div className="w-full h-full rounded-full overflow-hidden">
                           {renderWheelSvg(true)}
                         </div>
                       </div>
-
-                      <span className="text-[10px] text-neutral-500 text-center font-mono mt-1">
-                        {Math.round(sliceAngle)}° / szelet
-                      </span>
                     </div>
 
-                    {/* JOBB OLDAL: SZERKESZTŐ ÉS CSOMAGOK */}
                     <div className="flex-1 flex flex-col gap-4 min-w-0">
-                      {/* 1. Kész Kihívás-csomagok */}
                       <div className="flex flex-col gap-1.5">
                         <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
-                          <Layers className="w-3 h-3 text-amber-400" /> Kész Csomagok (Kattints a váltáshoz)
+                          <Layers className="w-3 h-3 text-amber-400" /> Kész Csomagok
                         </span>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {Object.entries(CHALLENGE_PRESETS).map(([key, pack]) => (
@@ -555,7 +534,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                         </div>
                       </div>
 
-                      {/* 2. Új feladvány űrlap */}
                       <form onSubmit={handleAddCustomCategory} className="flex flex-col gap-2.5 bg-neutral-950 p-3 rounded-2xl border border-neutral-800">
                         <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
                           <Plus className="w-3 h-3 text-amber-400" /> Saját Feladvány Hozzáadása
@@ -618,7 +596,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                         </div>
                       </form>
 
-                      {/* 3. Aktív szeletek listája */}
                       <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
                         {categories.map((cat, idx) => (
                           <div
@@ -640,7 +617,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                                   setCategories((prev) => [...prev, { ...cat, id: `${cat.id}-${Date.now()}` }]);
                                 }}
                                 className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-amber-300 transition"
-                                title="Duplázás"
                               >
                                 <Copy className="w-3 h-3" />
                               </button>
@@ -650,7 +626,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                                   setCategories((prev) => prev.filter((_, i) => i !== idx));
                                 }}
                                 className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-rose-400 transition"
-                                title="Törlés"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
@@ -659,7 +634,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
                         ))}
                       </div>
 
-                      {/* Alsó gombsor */}
                       <div className="flex justify-between items-center pt-2 border-t border-neutral-800 text-xs mt-auto">
                         <button
                           onClick={() => setCategories(CATEGORIES)}

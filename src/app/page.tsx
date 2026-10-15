@@ -28,14 +28,15 @@ import {
   RotateCcw, 
   Lock,
   Eraser,
-  Zap
+  Zap,
+  SlidersHorizontal,
+  Bell
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
 const TIME_OPTIONS = [15, 30, 45, 60, 0];
 type MusicFilter = "all" | "hungarian" | "international";
 
-// ================= OKOS INTRO SZÁMÍTÓ SEGÉDFÜGGVÉNYEK =================
 const getFirstLyricTime = (lyrics?: string): number => {
   if (!lyrics) return 0;
   const match = lyrics.match(/\[(\d{2}):(\d{2})\.?(\d{2,3})?\]/);
@@ -50,11 +51,30 @@ const getFirstLyricTime = (lyrics?: string): number => {
 
 const getSmartStartTime = (lyrics?: string): number => {
   const firstTime = getFirstLyricTime(lyrics);
-  // Ha az első sor több mint 6 mp-nél kezdődik, elé ugrunk 5 másodperccel
   if (firstTime > 6) {
     return Math.max(0, Math.floor(firstTime - 5));
   }
   return 0;
+};
+
+// Vetélkedő Buzzer hangjelzés a TV-n
+const playBuzzerSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(340, ctx.currentTime);
+    osc.frequency.setValueAtTime(480, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.45);
+  } catch (_) {}
 };
 
 export default function Home() {
@@ -71,13 +91,11 @@ export default function Home() {
     };
   }, [allTracks]);
 
-  // Szűrők
   const [musicFilter, setMusicFilter] = useState<MusicFilter>("all");
   const [minYear, setMinYear] = useState<number>(absoluteMinYear);
   const [maxYear, setMaxYear] = useState<number>(absoluteMaxYear);
-
-  // Okos Intro átugrás kapcsoló (alapból BE van kapcsolva)
   const [smartIntroSkip, setSmartIntroSkip] = useState<boolean>(true);
+  const [showFilters, setShowFilters] = useState<boolean>(true);
 
   useEffect(() => {
     setMinYear(absoluteMinYear);
@@ -99,7 +117,6 @@ export default function Home() {
     });
   }, [allTracks, musicFilter, minYear, maxYear]);
 
-  // Véletlenszerű pakli-kezelés
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playedIds, setPlayedIds] = useState<(string | number)[]>([]);
 
@@ -109,14 +126,11 @@ export default function Home() {
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [autoPlayCountdown, setAutoPlayCountdown] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"boards" | "game">("boards");
-
   const [autoSwitchTab, setAutoSwitchTab] = useState(false);
 
   const [selectedDuration, setSelectedDuration] = useState<number>(45);
   const [timeLeft, setTimeLeft] = useState<number>(45);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Fade In / Fade Out időzítő referencia
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [guessTarget, setGuessTarget] = useState<GuessTarget>("year");
@@ -126,6 +140,7 @@ export default function Home() {
   ]);
   const [activePlayerIdx, setActivePlayerIdx] = useState(0);
 
+  // Multiplayer & Buzzer
   const [roomCode, setRoomCode] = useState<string>("");
   const [isHostModalOpen, setIsHostModalOpen] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
@@ -133,6 +148,7 @@ export default function Home() {
   const [isJoinedAsClient, setIsJoinedAsClient] = useState(false);
   const [clientGrid, setClientGrid] = useState<boolean[][]>(createEmptyGrid());
   const [clientNotes, setClientNotes] = useState<string>("");
+  const [buzzedPlayer, setBuzzedPlayer] = useState<string | null>(null);
 
   const channelRef = useRef<any>(null);
   const activeCategoryRef = useRef<Category | null>(null);
@@ -154,7 +170,7 @@ export default function Home() {
   const fadeIn = (audio: HTMLAudioElement, targetVol = 1.0, durationMs = 1500) => {
     stopFadeTimer();
     try { audio.volume = 0; } catch (_) {}
-    const stepTime = 40;
+    const stepTime = 30;
     const steps = durationMs / stepTime;
     const increment = targetVol / steps;
     let curVol = 0;
@@ -166,15 +182,16 @@ export default function Home() {
     }, stepTime);
   };
 
-  const fadeOut = (audio: HTMLAudioElement, durationMs = 1200, onDone?: () => void) => {
+  const fadeOut = (audio: HTMLAudioElement, durationMs = 1800, onDone?: () => void) => {
     stopFadeTimer();
     const startVol = audio.volume;
     if (startVol <= 0.05) {
       audio.pause();
+      try { audio.volume = 1.0; } catch (_) {}
       if (onDone) onDone();
       return;
     }
-    const stepTime = 40;
+    const stepTime = 30;
     const steps = durationMs / stepTime;
     const decrement = startVol / steps;
     let curVol = startVol;
@@ -311,12 +328,34 @@ export default function Home() {
       }
     });
 
+    // Buzzer esemény a telefonokról a TV-re
+    channel.on("broadcast", { event: "buzzer_ring" }, ({ payload }) => {
+      if (!isJoinedAsClient && payload?.playerName) {
+        setBuzzedPlayer((prev) => prev || payload.playerName);
+        playBuzzerSound();
+        handleStop(false);
+      }
+    });
+
     channel.subscribe();
     return () => {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
   }, [roomCode, isJoinedAsClient]);
+
+  const handleClientBuzzer = () => {
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      try { navigator.vibrate([60, 40, 80]); } catch (_) {}
+    }
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "buzzer_ring",
+        payload: { playerName },
+      });
+    }
+  };
 
   const handleClientTileClick = (r: number, c: number) => {
     const willBeMarked = !clientGrid[r][c];
@@ -372,14 +411,17 @@ export default function Home() {
     }
   };
 
-  // Időzítő visszaszámláló: ha lejár -> lágy Fade-Out leállás
+  // Időzítő visszaszámláló: 3 másodperccel a vége előtt elindul a lágy elhalkulás
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlaying && selectedDuration > 0 && timeLeft > 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
+          if (prev === 3 && audioRef.current) {
+            fadeOut(audioRef.current, 2800);
+          }
           if (prev <= 1) {
-            handleStop(false);
+            handleStop(true);
             return 0;
           }
           return prev - 1;
@@ -397,6 +439,7 @@ export default function Home() {
   const handleSpinEnd = (cat: Category) => {
     setActiveCategory(cat);
     setGuessTarget(cat.targetType);
+    setBuzzedPlayer(null);
     setAutoPlayCountdown(3);
 
     if (channelRef.current) {
@@ -408,7 +451,6 @@ export default function Home() {
     }
   };
 
-  // Automata indítás a rulett után (Okos kezdéssel + Fade-In)
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (autoPlayCountdown !== null && autoPlayCountdown > 0) {
@@ -452,7 +494,6 @@ export default function Home() {
     }
   };
 
-  // Leállítás Fade-Out opcióval
   const handleStop = (immediate = false) => {
     if (!audioRef.current) {
       setIsPlaying(false);
@@ -464,13 +505,12 @@ export default function Home() {
       try { audioRef.current.volume = 1.0; } catch (_) {}
       setIsPlaying(false);
     } else {
-      fadeOut(audioRef.current, 1200, () => {
+      fadeOut(audioRef.current, 1600, () => {
         setIsPlaying(false);
       });
     }
   };
 
-  // Lejátszás ki/bekapcsolása (Okos kezdéssel + Fade-In)
   const handlePlayToggle = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
@@ -489,6 +529,7 @@ export default function Home() {
 
   const handleNextTrack = () => {
     setIsFlipped(false);
+    setBuzzedPlayer(null);
     handleStop(true);
     setAutoPlayCountdown(null);
     setTimeLeft(selectedDuration);
@@ -504,7 +545,43 @@ export default function Home() {
     }
   };
 
+  // ================= PC / LAPTOP BILLENTYŰPARANCSOK =================
+  useEffect(() => {
+    if (isJoinedAsClient) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (activeTab === "game") {
+          handleFlipAndShow();
+        } else {
+          handlePlayToggle();
+        }
+      } else if (e.code === "KeyP") {
+        e.preventDefault();
+        handlePlayToggle();
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        handleNextTrack();
+      } else if (e.code === "KeyR") {
+        e.preventDefault();
+        setActiveTab("game");
+        setIsFlipped(false);
+        setTimeout(() => {
+          document.querySelector<HTMLButtonElement>("#roulette-spin-btn")?.click();
+        }, 120);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
+
   const isWideOpenYears = minYear <= absoluteMinYear && maxYear >= absoluteMaxYear;
+  const progressPercent =
+    selectedDuration > 0 ? Math.max(0, Math.min(100, (timeLeft / selectedDuration) * 100)) : 100;
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://hit-roulette-party.vercel.app";
   const joinUrl = `${baseUrl}?room=${roomCode}`;
@@ -518,15 +595,17 @@ export default function Home() {
     <PinGate>
       {isJoinedAsClient ? (
         /* ==================== MOBIL NÉZET ==================== */
-        <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-4 select-none">
-          <header className="w-full flex justify-between items-center py-2 border-b border-neutral-800">
+        <main className="min-h-[100dvh] bg-neutral-950 text-white flex flex-col items-center justify-between p-3 sm:p-4 select-none">
+          <header className="w-full max-w-sm flex justify-between items-center py-2 border-b border-neutral-800">
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <h1 className="text-base font-black text-amber-400 uppercase tracking-wider">{playerName} táblája</h1>
+                <h1 className="text-sm sm:text-base font-black text-amber-400 uppercase tracking-wider">
+                  {playerName} táblája
+                </h1>
               </div>
               <p className="text-[10px] text-neutral-500 font-mono">
-                SZOBASZÁM: {roomCode} • PONT: {clientGrid.flat().filter(Boolean).length}/25
+                SZOBA: {roomCode} • PONT: {clientGrid.flat().filter(Boolean).length}/25
               </p>
             </div>
             
@@ -550,10 +629,9 @@ export default function Home() {
             </div>
           </header>
 
-          {/* TELEFONOS FELADVÁNY EMLÉKEZTETŐ SÁV */}
           {activeCategory && (
             <div
-              className="w-full max-w-xs py-2 px-3 rounded-2xl border text-center font-black text-xs uppercase tracking-wider my-2 shadow-lg transition-all animate-pulse"
+              className="w-full max-w-sm py-2 px-3 rounded-2xl border text-center font-black text-xs uppercase tracking-wider my-1.5 shadow-lg transition-all animate-pulse"
               style={{
                 backgroundColor: `${activeCategory.accent}20`,
                 borderColor: activeCategory.accent,
@@ -564,7 +642,16 @@ export default function Home() {
             </div>
           )}
 
-          <div className="w-full max-w-xs flex flex-col gap-3 my-auto">
+          <div className="w-full max-w-sm flex flex-col gap-2.5 my-auto">
+            {/* MOBIL GYORSASÁGI BUZZER GOMB */}
+            <button
+              onClick={handleClientBuzzer}
+              className="w-full py-2.5 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-600/30 active:scale-95 transition flex items-center justify-center gap-2"
+            >
+              <Bell className="w-4 h-4 fill-current animate-bounce" />
+              <span>🔔 TUDOM! (Buzzer Jelzés a TV-re)</span>
+            </button>
+
             <div className="bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-3 shadow-2xl">
               <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800">
                 {clientGrid.map((row, r) =>
@@ -589,7 +676,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="w-full bg-neutral-100 rounded-2xl p-3 shadow-inner border border-neutral-300 flex flex-col">
+            <div className="w-full bg-neutral-100 rounded-2xl p-2.5 shadow-inner border border-neutral-300 flex flex-col">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider">
                   Fehértábla (TV-re szinkronizálva):
@@ -621,18 +708,24 @@ export default function Home() {
         </main>
       ) : (
         /* ==================== TV / LAPTOP FŐOLDAL ==================== */
-        <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-between p-3 sm:p-6 select-none">
+        <main className="min-h-[100dvh] bg-neutral-950 text-white flex flex-col items-center justify-between p-2.5 sm:p-5 select-none relative overflow-x-hidden">
+          {/* Dinamikus háttérfény */}
+          <div
+            className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full blur-[150px] opacity-15 pointer-events-none transition-colors duration-700"
+            style={{ backgroundColor: activeCategory?.accent || "#f59e0b" }}
+          />
+
           {/* FEJLÉC */}
-          <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-3 border-b border-neutral-800/80 gap-3">
+          <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10">
             <div>
-              <h1 className="text-xl sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
+              <h1 className="text-lg sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
                 HIT-ROULETTE
               </h1>
-              <p className="text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
+              <p className="text-[9px] sm:text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-neutral-900 p-1 rounded-2xl border border-neutral-800">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-2xl border border-neutral-800">
                 <button
                   onClick={() => setActiveTab("boards")}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
@@ -654,62 +747,73 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* HÁZIGAZDA OKOS INTRO KAPCSOLÓ */}
               <button
                 onClick={() => setSmartIntroSkip((prev) => !prev)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
                   smartIntroSkip
                     ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
                     : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
                 }`}
-                title="Ha be van kapcsolva, a dal az első szöveges rész előtt 5 másodperccel indul (fade-in-nel)"
+                title="Ha be van kapcsolva, a dal az első szöveges rész előtt 5 másodperccel indul"
               >
                 <Zap className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Okos Intro:</span>
-                <span>{smartIntroSkip ? "BE (-5s)" : "KI (0s)"}</span>
+                <span className="hidden lg:inline">Okos Intro:</span>
+                <span>{smartIntroSkip ? "BE" : "KI"}</span>
               </button>
 
               <button
                 onClick={() => setAutoSwitchTab((prev) => !prev)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
                   autoSwitchTab
                     ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
                     : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
                 }`}
-                title="Ha kikapcsolod (Rögzítve), nem vált át automatikusan a táblákra a pörgetés után"
+                title="Automatikus lapozás a táblákra pörgetés után"
               >
                 <Tv className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Auto lapozás:</span>
-                <span>{autoSwitchTab ? "BE" : "RÖGZÍTVE"}</span>
+                <span className="hidden lg:inline">Auto lapozás:</span>
+                <span>{autoSwitchTab ? "BE" : "KI"}</span>
+              </button>
+
+              <button
+                onClick={() => setShowFilters((prev) => !prev)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  showFilters
+                    ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-300"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="Szűrősáv megjelenítése vagy elrejtése"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Szűrők</span>
               </button>
 
               <button
                 onClick={handleCreateRoom}
-                className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-violet-600 to-rose-600 text-white text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-violet-600 to-rose-600 text-white text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition"
               >
                 <QrCode className="w-3.5 h-3.5 text-amber-300" />
-                <span>{roomCode ? `Szoba: ${roomCode}` : "📱 Mobil (TV)"}</span>
+                <span>{roomCode ? `Szoba: ${roomCode}` : "📱 Mobil"}</span>
                 {onlinePlayers.length > 0 && (
-                  <span className="flex items-center gap-1 bg-emerald-500/30 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/50">
+                  <span className="flex items-center gap-1 bg-emerald-500/30 text-emerald-300 text-[10px] px-1.5 py-0.5 rounded-full border border-emerald-400/50">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    {onlinePlayers.length} online
+                    {onlinePlayers.length}
                   </span>
                 )}
               </button>
 
               <button
                 onClick={lockPinGate}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-rose-400 hover:border-rose-500/40 text-xs font-bold transition shadow active:scale-95"
-                title="Alkalmazás azonnali zárolása (PIN bekérés)"
+                className="p-2 rounded-2xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-rose-400 hover:border-rose-500/40 text-xs font-bold transition shadow active:scale-95"
+                title="Alkalmazás azonnali zárolása"
               >
                 <Lock className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Zárolás</span>
               </button>
             </div>
 
-            <div className="flex items-center gap-3 text-xs font-mono">
+            <div className="flex items-center gap-2 text-xs font-mono">
               <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-xl border border-neutral-800">
-                <Timer className="w-3.5 h-3.5 text-amber-400 ml-1.5 mr-0.5" />
+                <Timer className="w-3.5 h-3.5 text-amber-400 ml-1 mr-0.5" />
                 {TIME_OPTIONS.map((sec) => (
                   <button
                     key={sec}
@@ -720,105 +824,111 @@ export default function Home() {
                         : "text-neutral-400 hover:text-white"
                     }`}
                   >
-                    {sec === 0 ? "Végig" : `${sec}s`}
+                    {sec === 0 ? "∞" : `${sec}s`}
                   </button>
                 ))}
               </div>
-              <span className="text-amber-400 font-bold px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800 min-w-10 text-center">
+              <span className="text-amber-400 font-bold px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-800 min-w-10 text-center">
                 {selectedDuration === 0 ? "∞" : `${timeLeft}s`}
               </span>
             </div>
           </header>
 
-          {/* SZŰRŐSÁV */}
-          <div className="w-full max-w-6xl flex flex-col gap-2.5 py-2.5 px-2 bg-neutral-900/40 border border-neutral-800/80 rounded-2xl my-2 backdrop-blur-md">
-            <div className="w-full flex flex-wrap justify-between items-center gap-2 text-xs">
-              <div className="flex items-center gap-1.5 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800">
-                <Music2 className="w-3.5 h-3.5 text-amber-400 ml-1.5" />
-                <span className="text-[10px] uppercase font-bold text-neutral-500 px-1">Zenei Csomag:</span>
-                
-                <button
-                  onClick={() => setMusicFilter("all")}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
-                    musicFilter === "all" ? "bg-amber-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
-                  }`}
-                >
-                  🎲 Vegyes
-                </button>
-                
-                <button
-                  onClick={() => setMusicFilter("hungarian")}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
-                    musicFilter === "hungarian" ? "bg-emerald-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
-                  }`}
-                >
-                  🇭🇺 Magyar
-                </button>
+          {/* ÖSSZECSUKHATÓ SZŰRŐSÁV ÉVTIZED GYORSGOMBOKKAL */}
+          {showFilters && (
+            <div className="w-full max-w-6xl flex flex-col gap-2 py-2 px-3 bg-neutral-900/50 border border-neutral-800/80 rounded-2xl my-1.5 backdrop-blur-md z-10">
+              <div className="w-full flex flex-wrap justify-between items-center gap-2 text-xs">
+                <div className="flex items-center gap-1 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800">
+                  <Music2 className="w-3.5 h-3.5 text-amber-400 ml-1.5" />
+                  <button
+                    onClick={() => setMusicFilter("all")}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
+                      musicFilter === "all" ? "bg-amber-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    🎲 Vegyes
+                  </button>
+                  <button
+                    onClick={() => setMusicFilter("hungarian")}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
+                      musicFilter === "hungarian" ? "bg-emerald-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    🇭🇺 Magyar
+                  </button>
+                  <button
+                    onClick={() => setMusicFilter("international")}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
+                      musicFilter === "international" ? "bg-cyan-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    🌍 Nemzetközi
+                  </button>
+                </div>
 
-                <button
-                  onClick={() => setMusicFilter("international")}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition text-[11px] ${
-                    musicFilter === "international" ? "bg-cyan-500 text-neutral-950 shadow" : "text-neutral-400 hover:text-white"
-                  }`}
-                >
-                  🌍 Nemzetközi
-                </button>
-              </div>
+                {/* Korszak gyorsgombok */}
+                <div className="flex flex-wrap items-center gap-1">
+                  {[
+                    { label: "Összes", min: absoluteMinYear, max: absoluteMaxYear },
+                    { label: "80-as", min: 1980, max: 1989 },
+                    { label: "90-es", min: 1990, max: 1999 },
+                    { label: "2000-es", min: 2000, max: 2009 },
+                    { label: "2010+", min: 2010, max: absoluteMaxYear },
+                  ].map((era) => {
+                    const activeEra = minYear === era.min && maxYear === era.max;
+                    return (
+                      <button
+                        key={era.label}
+                        onClick={() => {
+                          setMinYear(era.min);
+                          setMaxYear(era.max);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          activeEra
+                            ? "bg-violet-600 border-violet-400 text-white shadow"
+                            : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                        }`}
+                      >
+                        {era.label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-neutral-900/90 border border-neutral-800 text-[11px] font-mono text-amber-400 font-bold">
-                  <Shuffle className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Véletlen sorrend</span>
-                  <span className="text-neutral-500 font-normal">
-                    ({playedIds.length}/{filteredTracks.length} játszva)
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-neutral-900/90 border border-neutral-800 text-[11px] font-mono text-amber-400 font-bold">
+                    <Shuffle className="w-3 h-3 text-amber-400" />
+                    <span>{playedIds.length}/{filteredTracks.length} dal</span>
                   </span>
-                </span>
-
-                <span className="text-[11px] text-neutral-400 font-mono hidden md:inline">
-                  Elérhető: <strong className="text-white">{filteredTracks.length}</strong> db
-                </span>
-              </div>
-            </div>
-
-            <div className="w-full flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-neutral-800/60">
-              <div className="flex items-center gap-3 flex-1 min-w-[280px]">
-                <CalendarRange className="w-4 h-4 text-cyan-400 shrink-0" />
-                
-                <div className="flex flex-col flex-1 gap-0.5">
-                  <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
-                    <span>Kezdő év:</span>
-                    <strong className="text-cyan-300">{minYear}</strong>
-                  </div>
-                  <input
-                    type="range"
-                    min={absoluteMinYear}
-                    max={maxYear}
-                    value={minYear}
-                    onChange={(e) => setMinYear(Math.min(Number(e.target.value), maxYear))}
-                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
-                  />
-                </div>
-
-                <div className="flex flex-col flex-1 gap-0.5">
-                  <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
-                    <span>Záró év:</span>
-                    <strong className="text-rose-300">{maxYear}</strong>
-                  </div>
-                  <input
-                    type="range"
-                    min={minYear}
-                    max={absoluteMaxYear}
-                    value={maxYear}
-                    onChange={(e) => setMaxYear(Math.max(Number(e.target.value), minYear))}
-                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-rose-400"
-                  />
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-800 text-[11px] font-bold font-mono text-neutral-300">
-                  {isWideOpenYears ? "Bármelyik korszak (Összes)" : `${minYear} – ${maxYear}`}
-                </span>
+              <div className="w-full flex flex-wrap items-center justify-between gap-3 pt-1.5 border-t border-neutral-800/60">
+                <div className="flex items-center gap-3 flex-1 min-w-[260px]">
+                  <CalendarRange className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="text-[10px] font-mono text-cyan-300 font-bold w-8">{minYear}</span>
+                    <input
+                      type="range"
+                      min={absoluteMinYear}
+                      max={maxYear}
+                      value={minYear}
+                      onChange={(e) => setMinYear(Math.min(Number(e.target.value), maxYear))}
+                      className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      type="range"
+                      min={minYear}
+                      max={absoluteMaxYear}
+                      value={maxYear}
+                      onChange={(e) => setMaxYear(Math.max(Number(e.target.value), minYear))}
+                      className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-rose-400"
+                    />
+                    <span className="text-[10px] font-mono text-rose-300 font-bold w-8">{maxYear}</span>
+                  </div>
+                </div>
 
                 {!isWideOpenYears && (
                   <button
@@ -826,18 +936,17 @@ export default function Home() {
                       setMinYear(absoluteMinYear);
                       setMaxYear(absoluteMaxYear);
                     }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-amber-300 text-[11px] font-bold transition shadow"
-                    title="Visszaállítás a teljes repertoárra"
+                    className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-amber-300 text-[11px] font-bold transition"
                   >
                     <RotateCcw className="w-3 h-3" />
-                    <span>Bármi</span>
+                    <span>Reset</span>
                   </button>
                 )}
               </div>
             </div>
-          </div>
+          )}
 
-          {/* AUDIO LEJÁTSZÓ ÉLŐ IDŐKÖVETÉSSEL ÉS MEGBÍZHATÓ INTRO BEÁLLÍTÁSSAL */}
+          {/* AUDIO ELEM */}
           <audio
             ref={audioRef}
             src={currentTrack?.audioUrl}
@@ -857,6 +966,7 @@ export default function Home() {
             }}
           />
 
+          {/* ÉRTESÍTŐ SÁVOK (COUNTDOWN ÉS BUZZER) */}
           {autoPlayCountdown !== null && (
             <div className="fixed top-20 z-50 flex items-center gap-3 px-6 py-2.5 rounded-full bg-amber-500 text-neutral-950 font-black shadow-2xl animate-bounce">
               <Sparkles className="w-5 h-5 fill-current" />
@@ -864,24 +974,38 @@ export default function Home() {
             </div>
           )}
 
-          {/* FŐ TARTALOM: KÖZPONTI FELADVÁNY MINDEN NÉZETBEN */}
-          <div className="w-full flex flex-col items-center my-auto py-2">
-            
+          {buzzedPlayer && (
+            <div className="fixed top-24 z-50 flex items-center gap-3 px-6 py-3 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-500 text-white font-black shadow-[0_0_40px_rgba(244,63,94,0.8)] animate-bounce border-2 border-white">
+              <Bell className="w-6 h-6 fill-current" />
+              <span className="text-sm sm:text-base uppercase tracking-wider">
+                🔔 {buzzedPlayer} CSENGETETT ELSŐKÉNT!
+              </span>
+              <button
+                onClick={() => setBuzzedPlayer(null)}
+                className="ml-2 p-1 rounded-lg bg-black/30 hover:bg-black/50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* FŐ TARTALOM */}
+          <div className="w-full flex flex-col items-center my-auto py-2 z-10">
             {activeCategory && (
               <div
-                className="flex items-center gap-3 px-6 py-2.5 rounded-2xl border-2 backdrop-blur-md shadow-2xl mb-4 transition-all animate-pulse"
+                className="flex items-center gap-3 px-5 py-2 rounded-2xl border-2 backdrop-blur-md shadow-2xl mb-3 transition-all"
                 style={{
                   backgroundColor: `${activeCategory.accent}20`,
                   borderColor: activeCategory.accent,
-                  boxShadow: `0 0 30px ${activeCategory.accent}35`,
+                  boxShadow: `0 0 25px ${activeCategory.accent}35`,
                 }}
               >
-                <Sparkles className="w-5 h-5 shrink-0" style={{ color: activeCategory.accent }} />
+                <Sparkles className="w-4 h-4 shrink-0" style={{ color: activeCategory.accent }} />
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-400">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300">
                     Aktív Szabály:
                   </span>
-                  <span className="text-sm sm:text-base font-black uppercase tracking-wide" style={{ color: activeCategory.accent }}>
+                  <span className="text-sm font-black uppercase tracking-wide" style={{ color: activeCategory.accent }}>
                     {activeCategory.label}
                   </span>
                   <span className="text-xs text-neutral-300 font-mono hidden sm:inline">
@@ -909,8 +1033,8 @@ export default function Home() {
               />
             ) : (
               <div className="w-full max-w-5xl flex flex-col items-center gap-6">
-                <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-center justify-items-center">
-                  <div className="flex flex-col items-center justify-center p-6 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full max-w-md shadow-2xl">
+                <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-center justify-items-center">
+                  <div className="flex flex-col items-center justify-center p-5 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full max-w-md shadow-2xl">
                     <RouletteWheel onSpinEnd={handleSpinEnd} />
                   </div>
 
@@ -923,6 +1047,7 @@ export default function Home() {
                         highlight={guessTarget}
                         currentTime={currentTime}
                         onSeek={handleSeek}
+                        isPlaying={isPlaying}
                       />
                     ) : (
                       <div className="w-80 h-96 rounded-3xl border-2 border-dashed border-neutral-800 flex flex-col items-center justify-center p-6 text-center text-neutral-500 gap-3">
@@ -939,17 +1064,24 @@ export default function Home() {
             )}
           </div>
 
-          {/* ALSÓ VEZÉRLŐSÁV */}
-          <footer className="w-full max-w-lg bg-neutral-900/80 backdrop-blur-lg border border-neutral-800 rounded-3xl p-3 flex items-center justify-between shadow-2xl mb-1">
+          {/* ALSÓ DOKKOLÓ VEZÉRLŐSÁV BEÉPÍTETT IDŐZÍTŐ CSÍKKAL */}
+          <footer className="relative overflow-hidden w-full max-w-lg bg-neutral-900/90 backdrop-blur-xl border border-neutral-800 rounded-3xl p-3 flex items-center justify-between shadow-2xl mb-1 z-10">
+            {selectedDuration > 0 && isPlaying && (
+              <div
+                className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-amber-400 via-rose-500 to-violet-500 transition-all duration-1000"
+                style={{ width: `${progressPercent}%` }}
+              />
+            )}
+
             <button
               onClick={handlePlayToggle}
               className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs sm:text-sm tracking-wide transition shadow-lg shadow-amber-500/20 active:scale-95"
+              title="Lejátszás / Szünet (P)"
             >
               {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-              <span>{isPlaying ? "Szünet" : "Zene"}</span>
+              <span>{isPlaying ? "Szünet (P)" : "Zene (P)"}</span>
             </button>
 
-            {/* A MEGFORDÍTÁS GOMB KIZÁRÓLAG A KÁRTYA NÉZETBEN JELENIK MEG */}
             {activeTab === "game" && (
               <button
                 onClick={handleFlipAndShow}
@@ -962,10 +1094,11 @@ export default function Home() {
 
             <button
               onClick={handleNextTrack}
-              className="p-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition active:scale-95 flex items-center gap-1"
-              title="Következő véletlenszerű dal"
+              className="px-3.5 py-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition active:scale-95 flex items-center gap-1.5 text-xs font-bold"
+              title="Következő véletlenszerű dal (Jobbra nyíl)"
             >
               <Shuffle className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Következő</span>
               <SkipForward className="w-4 h-4" />
             </button>
           </footer>
