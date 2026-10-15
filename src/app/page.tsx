@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import tracksData from "../data/tracks.json";
 import { MusicCard, GuessTarget } from "../components/MusicCard";
 import { RouletteWheel, Category } from "../components/RouletteWheel";
@@ -34,18 +35,38 @@ import {
   Crown,
   Send,
   CheckCircle2,
-  Trophy
+  Trophy,
+  Dices,
+  Volume2,
+  Award,
+  Flame
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
 const TIME_OPTIONS = [15, 30, 45, 60, 0];
 type MusicFilter = "all" | "hungarian" | "international";
+type SoundEffectType = "airhorn" | "crickets" | "trombone" | "drumroll";
 
 interface PlayerGuess {
   playerName: string;
   year: number;
   text: string;
+  riskDouble: boolean;
   submittedAt: number;
+}
+
+interface FloatingReaction {
+  id: string;
+  emoji: string;
+  playerName: string;
+  leftPercent: number;
+}
+
+interface PlayerSessionStats {
+  guessesCount: number;
+  totalYearDiff: number;
+  buzzerCount: number;
+  riskCount: number;
 }
 
 const getFirstLyricTime = (lyrics?: string): number => {
@@ -68,6 +89,7 @@ const getSmartStartTime = (lyrics?: string): number => {
   return 0;
 };
 
+// ================= WEB AUDIO API PARTI HANGEFFEKT SZINTETIZÁTOR =================
 const playBuzzerSound = () => {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -84,6 +106,104 @@ const playBuzzerSound = () => {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.45);
+  } catch (_) {}
+};
+
+const playPartySoundEffect = (effect: SoundEffectType) => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    if (effect === "airhorn") {
+      // Klasszikus MLG / Party Airhorn (több elhangolt fűrészfog-oszcillátor)
+      const freqs = [390, 465, 585];
+      freqs.forEach((f) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(f, ctx.currentTime);
+        gain.gain.setValueAtTime(0.16, ctx.currentTime);
+        gain.gain.setValueAtTime(0.02, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.16, ctx.currentTime + 0.16);
+        gain.gain.setValueAtTime(0.02, ctx.currentTime + 0.28);
+        gain.gain.setValueAtTime(0.18, ctx.currentTime + 0.32);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.85);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.85);
+      });
+    } else if (effect === "crickets") {
+      // Tücsökciripelés (magas frekvenciás impulzusok)
+      for (let burst = 0; burst < 3; burst++) {
+        for (let i = 0; i < 4; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const start = ctx.currentTime + burst * 0.38 + i * 0.045;
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(4100 + (i % 2) * 200, start);
+          gain.gain.setValueAtTime(0.12, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.035);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.035);
+        }
+      }
+    } else if (effect === "trombone") {
+      // Sad Trombone (Womp-womp-womp-wooomp)
+      const notes = [
+        { f: 293.66, start: 0, dur: 0.28 },
+        { f: 277.18, start: 0.3, dur: 0.28 },
+        { f: 261.63, start: 0.6, dur: 0.28 },
+        { f: 246.94, start: 0.9, dur: 0.65 },
+      ];
+      notes.forEach((n, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        const st = ctx.currentTime + n.start;
+        osc.frequency.setValueAtTime(n.f, st);
+        if (idx === 3) {
+          osc.frequency.linearRampToValueAtTime(n.f - 30, st + n.dur);
+        }
+        gain.gain.setValueAtTime(0.18, st);
+        gain.gain.exponentialRampToValueAtTime(0.001, st + n.dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(st);
+        osc.stop(st + n.dur);
+      });
+    } else if (effect === "drumroll") {
+      // Pergődob + Cintányér leütés a végén
+      for (let i = 0; i < 18; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const st = ctx.currentTime + i * 0.05;
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(140 + (i % 2) * 35, st);
+        osc.frequency.exponentialRampToValueAtTime(55, st + 0.04);
+        gain.gain.setValueAtTime(0.18, st);
+        gain.gain.exponentialRampToValueAtTime(0.001, st + 0.04);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(st);
+        osc.stop(st + 0.04);
+      }
+      // Záró akkord
+      const endOsc = ctx.createOscillator();
+      const endGain = ctx.createGain();
+      const endTime = ctx.currentTime + 0.92;
+      endOsc.type = "sine";
+      endOsc.frequency.setValueAtTime(523.25, endTime);
+      endGain.gain.setValueAtTime(0.25, endTime);
+      endGain.gain.exponentialRampToValueAtTime(0.001, endTime + 0.5);
+      endOsc.connect(endGain);
+      endGain.connect(ctx.destination);
+      endOsc.start(endTime);
+      endOsc.stop(endTime + 0.5);
+    }
   } catch (_) {}
 };
 
@@ -146,6 +266,9 @@ export default function Home() {
   const [smartIntroSkip, setSmartIntroSkip] = useState<boolean>(true);
   const [showFilters, setShowFilters] = useState<boolean>(true);
 
+  // Házigazda által ki/bekapcsolható Dupla vagy Semmi opció
+  const [doubleOrNothingEnabled, setDoubleOrNothingEnabled] = useState<boolean>(true);
+
   useEffect(() => {
     setMinYear(absoluteMinYear);
     setMaxYear(absoluteMaxYear);
@@ -203,30 +326,44 @@ export default function Home() {
   const [isRemoteOpen, setIsRemoteOpen] = useState<boolean>(false);
   const [clientGuessYear, setClientGuessYear] = useState<number>(1995);
   const [clientGuessText, setClientGuessText] = useState<string>("");
+  const [clientRiskDouble, setClientRiskDouble] = useState<boolean>(false);
   const [isGuessLocked, setIsGuessLocked] = useState<boolean>(false);
 
   // TV-n beérkezett Kahoot tippek az adott körben
   const [roundGuesses, setRoundGuesses] = useState<Record<string, PlayerGuess>>({});
 
+  // Lebegő Emoji-Ágyú & Parti Díjátadó (Podium) Állapotok
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
+  const [sessionStats, setSessionStats] = useState<Record<string, PlayerSessionStats>>({});
+  const [isPodiumOpen, setIsPodiumOpen] = useState<boolean>(false);
+  const scoredTrackIdRef = useRef<string | number | null>(null);
+
   const channelRef = useRef<any>(null);
   const activeCategoryRef = useRef<Category | null>(null);
+  const doubleOrNothingRef = useRef<boolean>(true);
   const remoteHandlersRef = useRef<{
     playToggle: () => void;
     flip: () => void;
     next: () => void;
     spin: () => void;
     switchTab: () => void;
+    openPodium: () => void;
   }>({
     playToggle: () => {},
     flip: () => {},
     next: () => {},
     spin: () => {},
     switchTab: () => {},
+    openPodium: () => {},
   });
 
   useEffect(() => {
     activeCategoryRef.current = activeCategory;
   }, [activeCategory]);
+
+  useEffect(() => {
+    doubleOrNothingRef.current = doubleOrNothingEnabled;
+  }, [doubleOrNothingEnabled]);
 
   const currentTrack = filteredTracks[currentIndex] || allTracks[0];
   const currentAccent = activeCategory?.accent || "#f59e0b";
@@ -384,11 +521,15 @@ export default function Home() {
         }
       });
 
-      if (!isJoinedAsClient && activeCategoryRef.current) {
+      if (!isJoinedAsClient) {
         channel.send({
           type: "broadcast",
           event: "game_state",
-          payload: { activeCategory: activeCategoryRef.current, targetType: activeCategoryRef.current.targetType },
+          payload: {
+            activeCategory: activeCategoryRef.current,
+            targetType: activeCategoryRef.current?.targetType || "year",
+            doubleOrNothingEnabled: doubleOrNothingRef.current,
+          },
         });
       }
     });
@@ -398,21 +539,39 @@ export default function Home() {
         setActiveCategory(payload.activeCategory);
         setGuessTarget(payload.targetType || payload.activeCategory.targetType);
       }
+      if (typeof payload.doubleOrNothingEnabled === "boolean") {
+        setDoubleOrNothingEnabled(payload.doubleOrNothingEnabled);
+        if (!payload.doubleOrNothingEnabled) setClientRiskDouble(false);
+      }
       if (payload.resetRound) {
         setIsGuessLocked(false);
         setClientGuessText("");
+        setClientRiskDouble(false);
       }
     });
 
+    // Buzzer csengő + Statisztika növelése
     channel.on("broadcast", { event: "buzzer_ring" }, ({ payload }) => {
       if (!isJoinedAsClient && payload?.playerName) {
-        setBuzzedPlayer((prev) => prev || payload.playerName);
-        playBuzzerSound();
-        remoteHandlersRef.current.playToggle();
+        setBuzzedPlayer((prev) => {
+          if (!prev) {
+            playBuzzerSound();
+            remoteHandlersRef.current.playToggle();
+            setSessionStats((st) => {
+              const cur = st[payload.playerName] || { guessesCount: 0, totalYearDiff: 0, buzzerCount: 0, riskCount: 0 };
+              return {
+                ...st,
+                [payload.playerName]: { ...cur, buzzerCount: cur.buzzerCount + 1 },
+              };
+            });
+            return payload.playerName;
+          }
+          return prev;
+        });
       }
     });
 
-    // Kahoot Vak Tipp fogadása a TV-n
+    // Kahoot Vak Tipp + Dupla vagy Semmi fogadása a TV-n
     channel.on("broadcast", { event: "submit_guess" }, ({ payload }) => {
       if (!isJoinedAsClient && payload?.playerName) {
         setRoundGuesses((prev) => ({
@@ -421,9 +580,29 @@ export default function Home() {
             playerName: payload.playerName,
             year: Number(payload.year),
             text: String(payload.text || "").trim(),
+            riskDouble: Boolean(payload.riskDouble),
             submittedAt: Date.now(),
           },
         }));
+      }
+    });
+
+    // 🥳 Lebegő Emoji-Ágyú és Hangpult fogadása a TV-n
+    channel.on("broadcast", { event: "party_reaction" }, ({ payload }) => {
+      if (isJoinedAsClient) return;
+      if (payload?.emoji) {
+        const id = `${Date.now()}-${Math.random()}`;
+        const leftPercent = Math.floor(Math.random() * 76) + 12;
+        setFloatingReactions((prev) => [
+          ...prev,
+          { id, emoji: payload.emoji, playerName: payload.playerName || "Vendég", leftPercent },
+        ]);
+        setTimeout(() => {
+          setFloatingReactions((prev) => prev.filter((item) => item.id !== id));
+        }, 3400);
+      }
+      if (payload?.sound) {
+        playPartySoundEffect(payload.sound as SoundEffectType);
       }
     });
 
@@ -436,6 +615,7 @@ export default function Home() {
       if (cmd === "next") remoteHandlersRef.current.next();
       if (cmd === "spin") remoteHandlersRef.current.spin();
       if (cmd === "switch_tab") remoteHandlersRef.current.switchTab();
+      if (cmd === "open_podium") remoteHandlersRef.current.openPodium();
     });
 
     channel.subscribe();
@@ -445,7 +625,24 @@ export default function Home() {
     };
   }, [roomCode, isJoinedAsClient]);
 
-  const sendRemoteCommand = (command: "toggle_play" | "flip" | "next" | "spin" | "switch_tab") => {
+  // Házigazda Dupla vagy Semmi kapcsoló szinkronizálása
+  const toggleDoubleOrNothingHost = () => {
+    const nextVal = !doubleOrNothingEnabled;
+    setDoubleOrNothingEnabled(nextVal);
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "game_state",
+        payload: {
+          activeCategory: activeCategoryRef.current,
+          targetType: activeCategoryRef.current?.targetType || "year",
+          doubleOrNothingEnabled: nextVal,
+        },
+      });
+    }
+  };
+
+  const sendRemoteCommand = (command: "toggle_play" | "flip" | "next" | "spin" | "switch_tab" | "open_podium") => {
     if (typeof window !== "undefined" && "vibrate" in navigator) {
       try { navigator.vibrate(25); } catch (_) {}
     }
@@ -454,6 +651,19 @@ export default function Home() {
         type: "broadcast",
         event: "remote_control",
         payload: { command, by: playerName },
+      });
+    }
+  };
+
+  const sendClientReaction = (emoji: string, sound?: SoundEffectType) => {
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      try { navigator.vibrate(20); } catch (_) {}
+    }
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "party_reaction",
+        payload: { playerName, emoji, sound },
       });
     }
   };
@@ -471,6 +681,7 @@ export default function Home() {
           playerName,
           year: clientGuessYear,
           text: clientGuessText,
+          riskDouble: doubleOrNothingEnabled ? clientRiskDouble : false,
         },
       });
     }
@@ -579,7 +790,12 @@ export default function Home() {
       channelRef.current.send({
         type: "broadcast",
         event: "game_state",
-        payload: { activeCategory: cat, targetType: cat.targetType, resetRound: true },
+        payload: {
+          activeCategory: cat,
+          targetType: cat.targetType,
+          doubleOrNothingEnabled,
+          resetRound: true,
+        },
       });
     }
   };
@@ -618,12 +834,39 @@ export default function Home() {
     }
   };
 
+  // Kártya megfordítása + Éjszakai Statisztikák rögzítése
   const handleFlipAndShow = () => {
     const nextFlipped = !isFlipped;
     setIsFlipped(nextFlipped);
     if (nextFlipped) {
       handleStop(false);
       confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+
+      // Statisztikák mentése az adott dalra (egyszer)
+      if (currentTrack && scoredTrackIdRef.current !== currentTrack.id) {
+        scoredTrackIdRef.current = currentTrack.id;
+        const guesses = Object.values(roundGuesses);
+        if (guesses.length > 0) {
+          setSessionStats((prev) => {
+            const next = { ...prev };
+            guesses.forEach((g) => {
+              const cur = next[g.playerName] || {
+                guessesCount: 0,
+                totalYearDiff: 0,
+                buzzerCount: 0,
+                riskCount: 0,
+              };
+              next[g.playerName] = {
+                ...cur,
+                guessesCount: cur.guessesCount + 1,
+                totalYearDiff: cur.totalYearDiff + Math.abs(g.year - currentTrack.year),
+                riskCount: cur.riskCount + (g.riskDouble ? 1 : 0),
+              };
+            });
+            return next;
+          });
+        }
+      }
     }
   };
 
@@ -685,10 +928,22 @@ export default function Home() {
         payload: {
           activeCategory: activeCategoryRef.current,
           targetType: activeCategoryRef.current?.targetType || "year",
+          doubleOrNothingEnabled: doubleOrNothingRef.current,
           resetRound: true,
         },
       });
     }
+  };
+
+  const handleOpenPodium = () => {
+    setIsPodiumOpen(true);
+    playPartySoundEffect("drumroll");
+    confetti({
+      particleCount: 150,
+      spread: 100,
+      origin: { y: 0.5 },
+      colors: ["#fbbf24", "#ec4899", "#10b981", "#8b5cf6"],
+    });
   };
 
   // Remote Handler referenciák frissítése
@@ -710,6 +965,7 @@ export default function Home() {
       switchTab: () => {
         setActiveTab((prev) => (prev === "boards" ? "game" : "boards"));
       },
+      openPodium: handleOpenPodium,
     };
   });
 
@@ -756,7 +1012,7 @@ export default function Home() {
   const onlinePlayers = players.filter((p) => p.isOnline);
   const guessList = Object.values(roundGuesses);
 
-  // Kahoot Rangsor Kiértékelése
+  // Kahoot Rangsor Kiértékelése (+ Dupla vagy Semmi logikával)
   const evaluatedGuesses = React.useMemo(() => {
     if (!currentTrack) return [];
     return guessList
@@ -772,15 +1028,81 @@ export default function Home() {
           (currentTrack.artist.toLowerCase().includes(normText) ||
             normText.includes(currentTrack.artist.toLowerCase()));
 
+        const wonDouble = g.riskDouble && (yearDiff === 0 || titleMatch || artistMatch);
+
         return {
           ...g,
           yearDiff,
           titleMatch,
           artistMatch,
+          wonDouble,
         };
       })
       .sort((a, b) => a.yearDiff - b.yearDiff || a.submittedAt - b.submittedAt);
   }, [guessList, currentTrack]);
+
+  // 🏆 PODIUM ÉS "AZ ESTE LEGJEI" KALKULÁCIÓ
+  const podiumData = React.useMemo(() => {
+    const rankedPlayers = [...players]
+      .map((p) => ({
+        ...p,
+        score: p.grid.flat().filter(Boolean).length,
+      }))
+      .sort((a, b) => Number(b.hasWon) - Number(a.hasWon) || b.score - a.score);
+
+    const champion = rankedPlayers[0];
+
+    // Sniper (Legkisebb átlagos évszám-eltérés)
+    let sniperName = "Még nincs tipp";
+    let sniperDetail = "-";
+    let bestAvg = Infinity;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if (st.guessesCount > 0) {
+        const avg = st.totalYearDiff / st.guessesCount;
+        if (avg < bestAvg) {
+          bestAvg = avg;
+          sniperName = name;
+          sniperDetail = `Átlag ±${avg.toFixed(1)} év (${st.guessesCount} tipp)`;
+        }
+      }
+    });
+
+    // Leggyorsabb Kezű (Buzzer)
+    let fastestName = "Még senki";
+    let fastestDetail = "0 csengetés";
+    let maxBuzz = 0;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if (st.buzzerCount > maxBuzz) {
+        maxBuzz = st.buzzerCount;
+        fastestName = name;
+        fastestDetail = `${st.buzzerCount}× első csengetés`;
+      }
+    });
+
+    // Legnagyobb Szerencsejátékos (Dupla vagy Semmi)
+    let gamblerName = "Még senki";
+    let gamblerDetail = "0 kockáztatás";
+    let maxRisk = 0;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if (st.riskCount > maxRisk) {
+        maxRisk = st.riskCount;
+        gamblerName = name;
+        gamblerDetail = `${st.riskCount}× Dupla vagy Semmi`;
+      }
+    });
+
+    return {
+      top3: rankedPlayers.slice(0, 3),
+      championName: champion?.name || "Házigazda",
+      championDetail: `${champion?.score || 0}/25 X ${champion?.hasWon ? "(BINGO!)" : ""}`,
+      sniperName,
+      sniperDetail,
+      fastestName,
+      fastestDetail,
+      gamblerName,
+      gamblerDetail,
+    };
+  }, [players, sessionStats]);
 
   return (
     <PinGate>
@@ -801,7 +1123,6 @@ export default function Home() {
             </div>
             
             <div className="flex items-center gap-1.5">
-              {/* 👑 MOBIL HÁZIGAZDA TÁVIRÁNYÍTÓ KAPCSOLÓ */}
               <button
                 onClick={() => setIsRemoteOpen((prev) => !prev)}
                 className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border transition ${
@@ -809,7 +1130,6 @@ export default function Home() {
                     ? "bg-amber-500 text-neutral-950 border-amber-400 shadow-lg"
                     : "bg-neutral-900 text-amber-400 border-neutral-800"
                 }`}
-                title="TV Távirányító megnyitása"
               >
                 <Crown className="w-3.5 h-3.5" />
                 <span>TV Vezérlő</span>
@@ -818,7 +1138,6 @@ export default function Home() {
               <button
                 onClick={lockPinGate}
                 className="text-xs text-neutral-500 hover:text-amber-400 p-1.5 rounded-lg bg-neutral-900 border border-neutral-800 transition"
-                title="PIN zárolás"
               >
                 <Lock className="w-3.5 h-3.5" />
               </button>
@@ -841,7 +1160,12 @@ export default function Home() {
                 <span className="flex items-center gap-1">
                   <Crown className="w-3.5 h-3.5" /> Házigazda TV Távirányító
                 </span>
-                <span className="text-neutral-500">Élő vezérlés</span>
+                <button
+                  onClick={() => sendRemoteCommand("open_podium")}
+                  className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/50 text-amber-300 font-bold"
+                >
+                  🏆 Díjátadó a TV-n
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <button
@@ -896,12 +1220,12 @@ export default function Home() {
             </div>
           )}
 
-          <div className="w-full max-w-sm flex flex-col gap-2.5 my-auto">
-            {/* 🎯 KAHOOT STÍLUSÚ VAK TIPPELŐ PANEL */}
+          <div className="w-full max-w-sm flex flex-col gap-2 my-auto">
+            {/* 🎯 KAHOOT VAK TIPPELŐ + 🎰 DUPLA VAGY SEMMI PANEL */}
             <div className="w-full bg-neutral-900 border-2 border-neutral-800 rounded-2xl p-3 shadow-xl flex flex-col gap-2">
               <div className="flex justify-between items-center">
                 <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                  🎯 Titkos Tipp Beküldése a TV-re
+                  🎯 Titkos Tipp a TV-re
                 </span>
                 {isGuessLocked && (
                   <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
@@ -910,7 +1234,7 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-2 bg-neutral-950 p-2 rounded-xl border border-neutral-800">
+              <div className="flex items-center justify-between gap-2 bg-neutral-950 p-1.5 rounded-xl border border-neutral-800">
                 <button
                   onClick={() => {
                     setIsGuessLocked(false);
@@ -922,7 +1246,7 @@ export default function Home() {
                 </button>
                 <div className="flex flex-col items-center flex-1">
                   <span className="text-[9px] text-neutral-500 uppercase font-bold">Tippelt Évszám</span>
-                  <span className="text-xl font-black font-mono text-amber-400">{clientGuessYear}</span>
+                  <span className="text-lg font-black font-mono text-amber-400">{clientGuessYear}</span>
                 </div>
                 <button
                   onClick={() => {
@@ -947,6 +1271,30 @@ export default function Home() {
                 className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
               />
 
+              {/* 🎰 DUPLA VAGY SEMMI GOMB (HA A HÁZIGAZDA ENGEDÉLYEZTE) */}
+              {doubleOrNothingEnabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGuessLocked(false);
+                    setClientRiskDouble((prev) => !prev);
+                  }}
+                  className={`w-full py-1.5 px-3 rounded-xl border text-[11px] font-black uppercase tracking-wider flex items-center justify-between transition ${
+                    clientRiskDouble
+                      ? "bg-gradient-to-r from-purple-600 to-rose-600 border-amber-300 text-white shadow-lg"
+                      : "bg-neutral-950 border-neutral-800 text-neutral-400"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Dices className="w-4 h-4 text-amber-300" />
+                    <span>🎲 Dupla vagy Semmi!</span>
+                  </span>
+                  <span className="text-[10px] font-mono">
+                    {clientRiskDouble ? "AKTÍV (+2 X / -1 X)" : "Kikapcsolva"}
+                  </span>
+                </button>
+              )}
+
               <div className="flex gap-1.5">
                 <input
                   type="text"
@@ -955,7 +1303,7 @@ export default function Home() {
                     setIsGuessLocked(false);
                     setClientGuessText(e.target.value);
                   }}
-                  placeholder="Előadó / Dalcím tipp (opcionális)..."
+                  placeholder="Előadó / Dalcím tipp..."
                   className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
                 />
                 <button
@@ -972,10 +1320,52 @@ export default function Home() {
               </div>
             </div>
 
+            {/* 🥳 ÉLŐ EMOJI-ÁGYÚ ÉS HANGPULT (PARTY SOUNDBOARD) */}
+            <div className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-2 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-1">
+                {["🔥", "💃", "🤯", "😂", "🍅"].map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => sendClientReaction(emoji)}
+                    className="flex-1 py-1.5 rounded-xl bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-lg active:scale-90 transition"
+                    title="Emoji felküldése a TV-re"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <button
+                  onClick={() => sendClientReaction("🎺", "airhorn")}
+                  className="py-1 px-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-[10px] font-bold text-amber-300 active:scale-95 flex items-center justify-center gap-1"
+                >
+                  <span>🎺 Duda</span>
+                </button>
+                <button
+                  onClick={() => sendClientReaction("🦗", "crickets")}
+                  className="py-1 px-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-[10px] font-bold text-emerald-300 active:scale-95 flex items-center justify-center gap-1"
+                >
+                  <span>🦗 Tücsök</span>
+                </button>
+                <button
+                  onClick={() => sendClientReaction("📉", "trombone")}
+                  className="py-1 px-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-[10px] font-bold text-rose-300 active:scale-95 flex items-center justify-center gap-1"
+                >
+                  <span>📉 Bukta</span>
+                </button>
+                <button
+                  onClick={() => sendClientReaction("🥁", "drumroll")}
+                  className="py-1 px-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-[10px] font-bold text-cyan-300 active:scale-95 flex items-center justify-center gap-1"
+                >
+                  <span>🥁 Pergés</span>
+                </button>
+              </div>
+            </div>
+
             {/* MOBIL GYORSASÁGI BUZZER GOMB */}
             <button
               onClick={handleClientBuzzer}
-              className="w-full py-2.5 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-600/30 active:scale-95 transition flex items-center justify-center gap-2"
+              className="w-full py-2 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-600/30 active:scale-95 transition flex items-center justify-center gap-2"
             >
               <Bell className="w-4 h-4 fill-current animate-bounce" />
               <span>🔔 TUDOM! (Buzzer megnyomása)</span>
@@ -1005,9 +1395,9 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="w-full bg-neutral-100 rounded-2xl p-2.5 shadow-inner border border-neutral-300 flex flex-col">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider">
+            <div className="w-full bg-neutral-100 rounded-2xl p-2 shadow-inner border border-neutral-300 flex flex-col">
+              <div className="flex justify-between items-center mb-0.5">
+                <span className="text-[9px] uppercase font-bold text-neutral-600 tracking-wider">
                   Fehértábla (Jegyzetek):
                 </span>
                 {clientNotes && (
@@ -1024,7 +1414,7 @@ export default function Home() {
                 value={clientNotes}
                 onChange={(e) => handleClientNotesChange(e.target.value)}
                 placeholder="Írd ide a dalok címeit, éveit..."
-                rows={2}
+                rows={1}
                 className="w-full bg-transparent text-neutral-900 font-bold text-xs focus:outline-none resize-none font-sans"
               />
             </div>
@@ -1043,6 +1433,30 @@ export default function Home() {
             style={{ backgroundColor: currentAccent }}
           />
 
+          {/* 🥳 LEBEGŐ EMOJI-ÁGYÚ RÉTEG A TV KÉPERNYŐN */}
+          <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+            <AnimatePresence>
+              {floatingReactions.map((r) => (
+                <motion.div
+                  key={r.id}
+                  initial={{ y: "92vh", opacity: 1, scale: 0.6 }}
+                  animate={{ y: "8vh", opacity: [1, 1, 0], scale: [0.8, 1.25, 1] }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 3.2, ease: "easeOut" }}
+                  style={{ left: `${r.leftPercent}%` }}
+                  className="absolute flex flex-col items-center"
+                >
+                  <span className="text-4xl sm:text-5xl drop-shadow-[0_6px_15px_rgba(0,0,0,0.8)]">
+                    {r.emoji}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-neutral-900/90 text-amber-300 px-2 py-0.5 rounded-full border border-neutral-700 shadow">
+                    {r.playerName}
+                  </span>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+
           {/* FEJLÉC */}
           <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10">
             <div>
@@ -1052,7 +1466,7 @@ export default function Home() {
               <p className="text-[9px] sm:text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-2xl border border-neutral-800">
                 <button
                   onClick={() => setActiveTab("boards")}
@@ -1082,10 +1496,26 @@ export default function Home() {
                     ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
                     : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
                 }`}
+                title="Okos Intro (-5s az első dalszöveg előtt)"
               >
                 <Zap className="w-3.5 h-3.5" />
-                <span className="hidden lg:inline">Okos Intro:</span>
+                <span className="hidden xl:inline">Intro:</span>
                 <span>{smartIntroSkip ? "BE" : "KI"}</span>
+              </button>
+
+              {/* 🎰 KIKAPCSOLHATÓ DUPLA VAGY SEMMI OPCIÓ A HÁZIGAZDÁNAK */}
+              <button
+                onClick={toggleDoubleOrNothingHost}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  doubleOrNothingEnabled
+                    ? "bg-purple-500/15 border-purple-500/50 text-purple-300"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="Dupla vagy Semmi kockáztatás engedélyezése vagy letiltása a telefonokon"
+              >
+                <Dices className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">Dupla/Semmi:</span>
+                <span>{doubleOrNothingEnabled ? "BE" : "KI"}</span>
               </button>
 
               <button
@@ -1097,7 +1527,7 @@ export default function Home() {
                 }`}
               >
                 <Tv className="w-3.5 h-3.5" />
-                <span className="hidden lg:inline">Auto lapozás:</span>
+                <span className="hidden xl:inline">Auto lap:</span>
                 <span>{autoSwitchTab ? "BE" : "KI"}</span>
               </button>
 
@@ -1125,6 +1555,16 @@ export default function Home() {
                     {onlinePlayers.length}
                   </span>
                 )}
+              </button>
+
+              {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & DÍJÁTADÓ GOMB */}
+              <button
+                onClick={handleOpenPodium}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-neutral-950 text-xs font-black shadow-lg hover:scale-105 active:scale-95 transition"
+                title="Parti Lezárása & Az Este Legjei Díjátadó"
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Díjátadó</span>
               </button>
 
               <button
@@ -1342,13 +1782,18 @@ export default function Home() {
                 <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-neutral-900/90 border border-emerald-500/40 text-xs">
                   <Lock className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="font-bold text-neutral-300">Tippelt:</span>
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-1.5">
                     {guessList.map((g) => (
                       <span
                         key={g.playerName}
-                        className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black text-[11px]"
+                        className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black text-[11px] flex items-center gap-1"
                       >
-                        {g.playerName} ✓
+                        <span>{g.playerName} ✓</span>
+                        {g.riskDouble && (
+                          <span className="text-amber-300 font-extrabold" title="Dupla vagy Semmit kockáztatott!">
+                            🎲2x
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>
@@ -1356,14 +1801,14 @@ export default function Home() {
               )}
             </div>
 
-            {/* 🏆 KAHOOT AUTOMATA EREDMÉNYHIRDETÉS PANEL (AMIKOR FELFORDUL A KÁRTYA) */}
+            {/* 🏆 KAHOOT + DUPLA VAGY SEMMI AUTOMATA KIÉRTÉKELÉS PANEL */}
             {isFlipped && evaluatedGuesses.length > 0 && (
               <div className="w-full max-w-3xl bg-neutral-900/95 border-2 border-amber-400 rounded-3xl p-4 mb-4 shadow-[0_0_50px_rgba(245,158,11,0.25)] animate-in fade-in zoom-in-95 duration-300">
                 <div className="flex items-center justify-between border-b border-neutral-800 pb-2 mb-3">
                   <div className="flex items-center gap-2">
                     <Trophy className="w-5 h-5 text-amber-400" />
                     <h3 className="text-sm font-black uppercase tracking-wider text-amber-300">
-                      Kahoot Kör Kiértékelés • Helyes évszám: {currentTrack?.year}
+                      Kör Kiértékelés • Helyes évszám: {currentTrack?.year}
                     </h3>
                   </div>
                   <span className="text-xs font-mono text-neutral-400">
@@ -1395,12 +1840,25 @@ export default function Home() {
                             {isExact ? "🥇" : isClose2 ? "🥈" : isClose5 ? "🥉" : "❌"}
                           </span>
                           <div>
-                            <div className="font-black text-xs uppercase text-white">
-                              {idx + 1}. {g.playerName}
+                            <div className="font-black text-xs uppercase text-white flex items-center gap-1.5">
+                              <span>
+                                {idx + 1}. {g.playerName}
+                              </span>
+                              {g.riskDouble && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
+                                    g.wonDouble
+                                      ? "bg-amber-400 text-neutral-950"
+                                      : "bg-rose-600 text-white"
+                                  }`}
+                                >
+                                  {g.wonDouble ? "🎰 DUPLA (+2 X)" : "💀 BUKTA (-1 X)"}
+                                </span>
+                              )}
                             </div>
                             {g.text && (
                               <div className="text-[10px] text-neutral-300">
-                                Szöveges tipp: „{g.text}”{" "}
+                                Tipp: „{g.text}”{" "}
                                 {(g.titleMatch || g.artistMatch) && (
                                   <span className="text-emerald-400 font-bold">(Találat! 🎯)</span>
                                 )}
@@ -1503,6 +1961,135 @@ export default function Home() {
               </button>
             </footer>
           </div>
+
+          {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & "AZ ESTE LEGJEI" DÍJÁTADÓ MODAL */}
+          {isPodiumOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg overflow-y-auto">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="w-full max-w-3xl bg-neutral-900 border-2 border-amber-400/80 rounded-[36px] p-6 sm:p-8 shadow-[0_0_80px_rgba(245,158,11,0.3)] flex flex-col items-center gap-6 text-center my-auto"
+              >
+                <div className="w-full flex justify-between items-center border-b border-neutral-800 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <Trophy className="w-7 h-7 text-amber-400" />
+                    <div className="text-left">
+                      <h2 className="text-lg sm:text-2xl font-black uppercase tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-300 to-white">
+                        Hit-Roulette Díjátadó & Dobogó
+                      </h2>
+                      <p className="text-xs text-neutral-400">Az este hivatalos végeredménye és különdíjai</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsPodiumOpen(false)}
+                    className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* TOP 3 DOBOGÓ */}
+                <div className="w-full grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-2">
+                  {podiumData.top3.map((p, idx) => {
+                    const medals = ["🥇 1. HELY", "🥈 2. HELY", "🥉 3. HELY"];
+                    const styles = [
+                      "bg-gradient-to-b from-amber-500/25 to-neutral-950 border-amber-400 sm:h-44",
+                      "bg-gradient-to-b from-slate-400/20 to-neutral-950 border-slate-400 sm:h-36",
+                      "bg-gradient-to-b from-orange-700/20 to-neutral-950 border-orange-500 sm:h-32",
+                    ];
+                    return (
+                      <div
+                        key={p.id}
+                        className={`rounded-3xl border-2 p-4 flex flex-col items-center justify-center gap-1.5 shadow-xl ${styles[idx]}`}
+                      >
+                        <span className="text-xs font-black uppercase tracking-widest text-amber-300">
+                          {medals[idx]}
+                        </span>
+                        <span className="text-lg font-black text-white uppercase truncate max-w-full">
+                          {p.name}
+                        </span>
+                        <span className="text-xs font-mono font-bold px-3 py-0.5 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200">
+                          {p.score} / 25 X {p.hasWon ? "🏆 BINGO" : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 4 KÜLÖNDÍJ KÁRTYA ("AZ ESTE LEGJEI") */}
+                <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                  <div className="p-4 rounded-2xl bg-neutral-950 border border-amber-500/40 flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-2xl shrink-0">
+                      👑
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">
+                        Az Este Bajnoka
+                      </span>
+                      <h4 className="text-base font-black text-white uppercase">{podiumData.championName}</h4>
+                      <p className="text-xs text-neutral-400 font-mono">{podiumData.championDetail}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-neutral-950 border border-emerald-500/40 flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-2xl shrink-0">
+                      🎯
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                        Az Élő Lexikon (Sniper)
+                      </span>
+                      <h4 className="text-base font-black text-white uppercase">{podiumData.sniperName}</h4>
+                      <p className="text-xs text-neutral-400 font-mono">{podiumData.sniperDetail}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-neutral-950 border border-rose-500/40 flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-2xl shrink-0">
+                      ⚡
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">
+                        A Leggyorsabb Kezű (Buzzer)
+                      </span>
+                      <h4 className="text-base font-black text-white uppercase">{podiumData.fastestName}</h4>
+                      <p className="text-xs text-neutral-400 font-mono">{podiumData.fastestDetail}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-neutral-950 border border-purple-500/40 flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-2xl shrink-0">
+                      🎲
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+                        A Legnagyobb Szerencsejátékos
+                      </span>
+                      <h4 className="text-base font-black text-white uppercase">{podiumData.gamblerName}</h4>
+                      <p className="text-xs text-neutral-400 font-mono">{podiumData.gamblerDetail}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="w-full flex justify-between items-center pt-2">
+                  <button
+                    onClick={() => playPartySoundEffect("airhorn")}
+                    className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                    <span>🎺 Győzelmi Duda</span>
+                  </button>
+
+                  <button
+                    onClick={() => setIsPodiumOpen(false)}
+                    className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs uppercase tracking-wider transition shadow-lg"
+                  >
+                    Folytatás / Bezárás
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
 
           {/* TV QR KÓD MODAL */}
           {isHostModalOpen && (
