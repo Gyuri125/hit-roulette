@@ -5,28 +5,35 @@ import { motion, AnimatePresence } from "framer-motion";
 import tracksData from "../data/tracks.json";
 import { MusicCard, GuessTarget } from "../components/MusicCard";
 import { RouletteWheel, Category } from "../components/RouletteWheel";
-import { PlayerBoard, PlayerData, createEmptyGrid, checkBingo } from "../components/PlayerBoard";
+import {
+  PlayerBoard,
+  PlayerData,
+  createEmptyGrid,
+  checkBingo,
+  getSharedAudioContext,
+  playMarkerSound,
+} from "../components/PlayerBoard";
 import { Track } from "../types/track";
 import { supabase } from "../lib/supabase";
 import { PinGate, lockPinGate } from "../components/PinGate";
-import { 
-  Play, 
-  Pause, 
-  SkipForward, 
-  Timer, 
-  Sparkles, 
-  LayoutGrid, 
-  Disc, 
-  Eye, 
-  QrCode, 
-  Smartphone, 
-  X, 
-  Users, 
-  Music2, 
-  Tv, 
-  Shuffle, 
-  CalendarRange, 
-  RotateCcw, 
+import {
+  Play,
+  Pause,
+  SkipForward,
+  Timer,
+  Sparkles,
+  LayoutGrid,
+  Disc,
+  Eye,
+  QrCode,
+  Smartphone,
+  X,
+  Users,
+  Music2,
+  Tv,
+  Shuffle,
+  CalendarRange,
+  RotateCcw,
   Lock,
   Eraser,
   Zap,
@@ -38,8 +45,11 @@ import {
   Trophy,
   Dices,
   Volume2,
-  Award,
-  Flame
+  Maximize2,
+  Minimize2,
+  ShieldCheck,
+  Plus,
+  RefreshCw,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -89,12 +99,63 @@ const getSmartStartTime = (lyrics?: string): number => {
   return 0;
 };
 
-// ================= WEB AUDIO API PARTI HANGEFFEKT SZINTETIZÁTOR =================
+// ================= 6. ÉKEZET- ÉS ELGÉPELÉSTŰRŐ (FUZZY LEVENSHTEIN) MOTOR =================
+const normalizeForMatch = (str: string): string =>
+  str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // ékezetek eltávolítása
+    .replace(/[^a-z0-9\s]/g, "") // írásjelek eltávolítása (pl. AC/DC -> acdc)
+    .replace(/\s+/g, " ")
+    .trim();
+
+const levenshteinSimilarity = (a: string, b: string): number => {
+  if (!a.length || !b.length) return 0;
+  if (a === b) return 1;
+  const matrix: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  const maxLen = Math.max(a.length, b.length);
+  return (maxLen - matrix[a.length][b.length]) / maxLen;
+};
+
+const isFuzzyTextMatch = (guessRaw: string, targetRaw: string): boolean => {
+  const g = normalizeForMatch(guessRaw);
+  const t = normalizeForMatch(targetRaw);
+  if (g.length < 3 || !t.length) return false;
+
+  // Teljes vagy részleges szövegegyezés (pl. "zaray" a "zaray marta & vamosi janos"-ban)
+  if (t.includes(g) || g.includes(t)) return true;
+
+  // Szóköz nélküli egyezés (pl. "ac dc" == "acdc")
+  const gCompact = g.replace(/\s+/g, "");
+  const tCompact = t.replace(/\s+/g, "");
+  if (gCompact.length >= 3 && (tCompact.includes(gCompact) || gCompact.includes(tCompact))) {
+    return true;
+  }
+
+  // Levenshtein hasonlóság >= 75%
+  if (levenshteinSimilarity(g, t) >= 0.75) return true;
+  if (levenshteinSimilarity(gCompact, tCompact) >= 0.75) return true;
+
+  return false;
+};
+
+// ================= SINGLETON WEB AUDIO HANGEFFEKTEK =================
 const playBuzzerSound = () => {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = "sawtooth";
@@ -111,12 +172,10 @@ const playBuzzerSound = () => {
 
 const playPartySoundEffect = (effect: SoundEffectType) => {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
 
     if (effect === "airhorn") {
-      // Klasszikus MLG / Party Airhorn (több elhangolt fűrészfog-oszcillátor)
       const freqs = [390, 465, 585];
       freqs.forEach((f) => {
         const osc = ctx.createOscillator();
@@ -135,7 +194,6 @@ const playPartySoundEffect = (effect: SoundEffectType) => {
         osc.stop(ctx.currentTime + 0.85);
       });
     } else if (effect === "crickets") {
-      // Tücsökciripelés (magas frekvenciás impulzusok)
       for (let burst = 0; burst < 3; burst++) {
         for (let i = 0; i < 4; i++) {
           const osc = ctx.createOscillator();
@@ -152,7 +210,6 @@ const playPartySoundEffect = (effect: SoundEffectType) => {
         }
       }
     } else if (effect === "trombone") {
-      // Sad Trombone (Womp-womp-womp-wooomp)
       const notes = [
         { f: 293.66, start: 0, dur: 0.28 },
         { f: 277.18, start: 0.3, dur: 0.28 },
@@ -176,7 +233,6 @@ const playPartySoundEffect = (effect: SoundEffectType) => {
         osc.stop(st + n.dur);
       });
     } else if (effect === "drumroll") {
-      // Pergődob + Cintányér leütés a végén
       for (let i = 0; i < 18; i++) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -191,7 +247,6 @@ const playPartySoundEffect = (effect: SoundEffectType) => {
         osc.start(st);
         osc.stop(st + 0.04);
       }
-      // Záró akkord
       const endOsc = ctx.createOscillator();
       const endGain = ctx.createGain();
       const endTime = ctx.currentTime + 0.92;
@@ -265,9 +320,34 @@ export default function Home() {
   const [maxYear, setMaxYear] = useState<number>(absoluteMaxYear);
   const [smartIntroSkip, setSmartIntroSkip] = useState<boolean>(true);
   const [showFilters, setShowFilters] = useState<boolean>(true);
-
-  // Házigazda által ki/bekapcsolható Dupla vagy Semmi opció
   const [doubleOrNothingEnabled, setDoubleOrNothingEnabled] = useState<boolean>(true);
+
+  // 7. SZIGORÚ KVÍZ MÓD (Automata Jutalom X & Csalásvédelem)
+  const [strictQuizMode, setStrictQuizMode] = useState<boolean>(true);
+
+  // 1. KÉPERNYŐ-ÉBRENTARTÁS (Wake Lock API)
+  const [wakeLockActive, setWakeLockActive] = useState<boolean>(false);
+  const wakeLockRef = useRef<any>(null);
+
+  // ⛶ 1-Kattintásos TV Fullscreen (Mozimód)
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener("fullscreenchange", handleFsChange);
+    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (typeof document === "undefined") return;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
 
   useEffect(() => {
     setMinYear(absoluteMinYear);
@@ -290,6 +370,7 @@ export default function Home() {
   }, [allTracks, musicFilter, minYear, maxYear]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [nextPreloadIndex, setNextPreloadIndex] = useState<number>(1);
   const [playedIds, setPlayedIds] = useState<(string | number)[]>([]);
 
   const [isFlipped, setIsFlipped] = useState(false);
@@ -329,6 +410,11 @@ export default function Home() {
   const [clientRiskDouble, setClientRiskDouble] = useState<boolean>(false);
   const [isGuessLocked, setIsGuessLocked] = useState<boolean>(false);
 
+  // 7. MOBIL JUTALOM X KREDITEK ÉS BÜNTETÉS (Szigorú Kvíz Mód)
+  const [clientCredits, setClientCredits] = useState<number>(0);
+  const [clientPenaltyDebt, setClientPenaltyDebt] = useState<number>(0);
+  const [clientRewardBanner, setClientRewardBanner] = useState<string | null>(null);
+
   // TV-n beérkezett Kahoot tippek az adott körben
   const [roundGuesses, setRoundGuesses] = useState<Record<string, PlayerGuess>>({});
 
@@ -337,10 +423,12 @@ export default function Home() {
   const [sessionStats, setSessionStats] = useState<Record<string, PlayerSessionStats>>({});
   const [isPodiumOpen, setIsPodiumOpen] = useState<boolean>(false);
   const scoredTrackIdRef = useRef<string | number | null>(null);
+  const hostHydratedRef = useRef<boolean>(false);
 
   const channelRef = useRef<any>(null);
   const activeCategoryRef = useRef<Category | null>(null);
   const doubleOrNothingRef = useRef<boolean>(true);
+  const strictQuizModeRef = useRef<boolean>(true);
   const remoteHandlersRef = useRef<{
     playToggle: () => void;
     flip: () => void;
@@ -365,8 +453,129 @@ export default function Home() {
     doubleOrNothingRef.current = doubleOrNothingEnabled;
   }, [doubleOrNothingEnabled]);
 
+  useEffect(() => {
+    strictQuizModeRef.current = strictQuizMode;
+  }, [strictQuizMode]);
+
   const currentTrack = filteredTracks[currentIndex] || allTracks[0];
+  const nextPreloadTrack = filteredTracks[nextPreloadIndex] || allTracks[0];
   const currentAccent = activeCategory?.accent || "#f59e0b";
+
+  // ================= 1. WAKE LOCK ÉS 5. VISIBILITY RECONNECT =================
+  const requestWakeLock = async () => {
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request("screen");
+        setWakeLockActive(true);
+        wakeLockRef.current.addEventListener("release", () => {
+          setWakeLockActive(false);
+        });
+      } catch (_) {
+        setWakeLockActive(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        requestWakeLock();
+        // Ha mobil játékos visszatér a böngészőbe, azonnal kér szinkront a TV-től
+        if (isJoinedAsClient && channelRef.current && playerName) {
+          channelRef.current.send({
+            type: "broadcast",
+            event: "sync_request",
+            payload: { playerName },
+          });
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+      }
+    };
+  }, [isJoinedAsClient, playerName]);
+
+  // ================= 2. HÁZIGAZDA (TV) ANTI-REFRESH MENTÉS ÉS VISSZATÖLTÉS =================
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const urlRoom = params.get("room");
+
+    // Mobil kliens állapot visszatöltése
+    const savedName = localStorage.getItem("hit_player_name");
+    const savedRoom = localStorage.getItem("hit_room_code");
+    const savedGrid = localStorage.getItem("hit_player_grid");
+    const savedNotes = localStorage.getItem("hit_player_notes");
+    const savedCredits = localStorage.getItem("hit_player_credits");
+    const savedDebt = localStorage.getItem("hit_player_debt");
+
+    if (savedCredits !== null) setClientCredits(Math.max(0, parseInt(savedCredits, 10) || 0));
+    if (savedDebt !== null) setClientPenaltyDebt(Math.max(0, parseInt(savedDebt, 10) || 0));
+
+    if (urlRoom) {
+      setRoomCode(urlRoom.toUpperCase());
+      if (savedName) setPlayerName(savedName);
+      setIsJoinModalOpen(true);
+      hostHydratedRef.current = true;
+      return;
+    }
+
+    if (savedRoom && savedName) {
+      setRoomCode(savedRoom);
+      setPlayerName(savedName);
+      if (savedGrid) {
+        try { setClientGrid(JSON.parse(savedGrid)); } catch (_) {}
+      }
+      if (savedNotes) setClientNotes(savedNotes);
+      setIsJoinedAsClient(true);
+      hostHydratedRef.current = true;
+      return;
+    }
+
+    // Házigazda (TV) állapot visszatöltése F5 frissítés után
+    const hostRoom = localStorage.getItem("hit_host_room_code");
+    const hostPlayers = localStorage.getItem("hit_host_players");
+    const hostPlayed = localStorage.getItem("hit_host_played_ids");
+    const hostStats = localStorage.getItem("hit_host_session_stats");
+    const hostStrict = localStorage.getItem("hit_host_strict_mode");
+
+    if (hostRoom) setRoomCode(hostRoom);
+    if (hostPlayers) {
+      try {
+        const parsed = JSON.parse(hostPlayers);
+        if (Array.isArray(parsed) && parsed.length > 0) setPlayers(parsed);
+      } catch (_) {}
+    }
+    if (hostPlayed) {
+      try { setPlayedIds(JSON.parse(hostPlayed)); } catch (_) {}
+    }
+    if (hostStats) {
+      try { setSessionStats(JSON.parse(hostStats)); } catch (_) {}
+    }
+    if (hostStrict !== null) {
+      setStrictQuizMode(hostStrict === "true");
+    }
+
+    hostHydratedRef.current = true;
+  }, []);
+
+  // Házigazda (TV) állapot folyamatos mentése
+  useEffect(() => {
+    if (!hostHydratedRef.current || isJoinedAsClient || typeof window === "undefined") return;
+    if (roomCode) localStorage.setItem("hit_host_room_code", roomCode);
+    localStorage.setItem("hit_host_players", JSON.stringify(players));
+    localStorage.setItem("hit_host_played_ids", JSON.stringify(playedIds));
+    localStorage.setItem("hit_host_session_stats", JSON.stringify(sessionStats));
+    localStorage.setItem("hit_host_strict_mode", String(strictQuizMode));
+  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isJoinedAsClient]);
 
   // ================= FADE IN & FADE OUT MOTOR =================
   const stopFadeTimer = () => {
@@ -421,70 +630,55 @@ export default function Home() {
     return () => stopFadeTimer();
   }, []);
 
-  const pickNextRandomIndex = (pool: Track[], currentId?: string | number): number => {
+  // ================= 4. KÖVETKEZŐ DAL ELŐSORSOLÁSA ÉS PRELOAD =================
+  const computeCandidateIndex = (pool: Track[], excludeIds: (string | number)[], currentId?: string | number): number => {
     if (!pool.length) return 0;
     if (pool.length === 1) return 0;
 
-    let unplayed = pool.filter((t) => !playedIds.includes(t.id));
+    let unplayed = pool.filter((t) => !excludeIds.includes(t.id));
     if (unplayed.length === 0) {
-      unplayed = pool;
-      setPlayedIds(currentId !== undefined ? [currentId] : []);
+      unplayed = pool.filter((t) => t.id !== currentId);
     }
-
-    const candidates = unplayed.filter((t) => t.id !== currentId);
-    const chosen = (candidates.length > 0 ? candidates : unplayed)[
-      Math.floor(Math.random() * (candidates.length > 0 ? candidates.length : unplayed.length))
-    ];
-
-    setPlayedIds((prev) => [...prev, chosen.id]);
-    const chosenIdx = pool.findIndex((t) => t.id === chosen.id);
-    return chosenIdx !== -1 ? chosenIdx : 0;
+    const candidates = unplayed.length > 0 ? unplayed : pool;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    const idx = pool.findIndex((t) => t.id === chosen.id);
+    return idx !== -1 ? idx : 0;
   };
 
   useEffect(() => {
     if (filteredTracks.length > 0) {
       const rndIdx = Math.floor(Math.random() * filteredTracks.length);
+      const firstId = filteredTracks[rndIdx].id;
       setCurrentIndex(rndIdx);
-      setPlayedIds([filteredTracks[rndIdx].id]);
+      setPlayedIds([firstId]);
+      const preloadIdx = computeCandidateIndex(filteredTracks, [firstId], firstId);
+      setNextPreloadIndex(preloadIdx);
       handleStop(true);
       setIsFlipped(false);
     }
   }, [musicFilter, minYear, maxYear]);
 
-  // Mobil cache visszatöltése
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedName = localStorage.getItem("hit_player_name");
-      const savedRoom = localStorage.getItem("hit_room_code");
-      const savedGrid = localStorage.getItem("hit_player_grid");
-      const savedNotes = localStorage.getItem("hit_player_notes");
-
-      const params = new URLSearchParams(window.location.search);
-      const urlRoom = params.get("room");
-
-      if (urlRoom) {
-        setRoomCode(urlRoom.toUpperCase());
-        if (savedName) setPlayerName(savedName);
-        setIsJoinModalOpen(true);
-      } else if (savedRoom && savedName) {
-        setRoomCode(savedRoom);
-        setPlayerName(savedName);
-        if (savedGrid) {
-          try { setClientGrid(JSON.parse(savedGrid)); } catch (_) {}
-        }
-        if (savedNotes) setClientNotes(savedNotes);
-        setIsJoinedAsClient(true);
-      }
-    }
-  }, []);
-
   const handleCreateRoom = () => {
-    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-    setRoomCode(code);
+    if (!roomCode) {
+      const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+      setRoomCode(code);
+    }
     setIsHostModalOpen(true);
   };
 
-  // Realtime Supabase Broadcast
+  const handleResetHostSession = () => {
+    if (!confirm("Biztosan új partit indítasz? Minden tábla és pontszám nullázódik, és új szobakód generálódik.")) return;
+    const newCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    setRoomCode(newCode);
+    setPlayers([{ id: "host", name: "Házigazda", notes: "", grid: createEmptyGrid(), hasWon: false }]);
+    setSessionStats({});
+    setRoundGuesses({});
+    localStorage.removeItem("hit_host_players");
+    localStorage.removeItem("hit_host_session_stats");
+    localStorage.setItem("hit_host_room_code", newCode);
+  };
+
+  // ================= REALTIME SUPABASE BROADCAST =================
   useEffect(() => {
     if (!roomCode) return;
 
@@ -492,6 +686,19 @@ export default function Home() {
       config: { broadcast: { self: false } },
     });
     channelRef.current = channel;
+
+    const broadcastCurrentGameState = () => {
+      channel.send({
+        type: "broadcast",
+        event: "game_state",
+        payload: {
+          activeCategory: activeCategoryRef.current,
+          targetType: activeCategoryRef.current?.targetType || "year",
+          doubleOrNothingEnabled: doubleOrNothingRef.current,
+          strictQuizMode: strictQuizModeRef.current,
+        },
+      });
+    };
 
     channel.on("broadcast", { event: "player_sync" }, ({ payload }) => {
       setPlayers((prev) => {
@@ -522,15 +729,14 @@ export default function Home() {
       });
 
       if (!isJoinedAsClient) {
-        channel.send({
-          type: "broadcast",
-          event: "game_state",
-          payload: {
-            activeCategory: activeCategoryRef.current,
-            targetType: activeCategoryRef.current?.targetType || "year",
-            doubleOrNothingEnabled: doubleOrNothingRef.current,
-          },
-        });
+        broadcastCurrentGameState();
+      }
+    });
+
+    // 5. VISIBILITY RECONNECT: Ha egy telefon felébred, a TV visszaküldi az aktuális játékszabályokat
+    channel.on("broadcast", { event: "sync_request" }, () => {
+      if (!isJoinedAsClient) {
+        broadcastCurrentGameState();
       }
     });
 
@@ -543,14 +749,53 @@ export default function Home() {
         setDoubleOrNothingEnabled(payload.doubleOrNothingEnabled);
         if (!payload.doubleOrNothingEnabled) setClientRiskDouble(false);
       }
+      if (typeof payload.strictQuizMode === "boolean") {
+        setStrictQuizMode(payload.strictQuizMode);
+      }
       if (payload.resetRound) {
         setIsGuessLocked(false);
         setClientGuessText("");
         setClientRiskDouble(false);
+        setClientRewardBanner(null);
       }
     });
 
-    // Buzzer csengő + Statisztika növelése
+    // 7. AUTOMATA JUTALOM X KREDIT FOGADÁSA A TELEFONON
+    channel.on("broadcast", { event: "award_credits" }, ({ payload }) => {
+      if (!isJoinedAsClient) return;
+      const myAward = payload?.awards?.[playerName];
+      if (!myAward) return;
+
+      if (myAward.deltaCredits > 0) {
+        setClientCredits((prev) => {
+          const next = prev + myAward.deltaCredits;
+          localStorage.setItem("hit_player_credits", String(next));
+          return next;
+        });
+        setClientRewardBanner(`🎉 +${myAward.deltaCredits} X lépést szereztél! (${myAward.reason})`);
+        if (typeof window !== "undefined" && "vibrate" in navigator) {
+          try { navigator.vibrate([50, 40, 90]); } catch (_) {}
+        }
+      } else if (myAward.penalty > 0) {
+        setClientCredits((prev) => {
+          if (prev >= myAward.penalty) {
+            const next = prev - myAward.penalty;
+            localStorage.setItem("hit_player_credits", String(next));
+            setClientRewardBanner("💀 Dupla vagy Semmi bukta: -1 X kredit levonva!");
+            return next;
+          } else {
+            setClientPenaltyDebt((d) => {
+              const nextDebt = d + 1;
+              localStorage.setItem("hit_player_debt", String(nextDebt));
+              return nextDebt;
+            });
+            setClientRewardBanner("💀 Dupla vagy Semmi bukta: Radírozz le 1 X-et a tábládról!");
+            return prev;
+          }
+        });
+      }
+    });
+
     channel.on("broadcast", { event: "buzzer_ring" }, ({ payload }) => {
       if (!isJoinedAsClient && payload?.playerName) {
         setBuzzedPlayer((prev) => {
@@ -571,7 +816,6 @@ export default function Home() {
       }
     });
 
-    // Kahoot Vak Tipp + Dupla vagy Semmi fogadása a TV-n
     channel.on("broadcast", { event: "submit_guess" }, ({ payload }) => {
       if (!isJoinedAsClient && payload?.playerName) {
         setRoundGuesses((prev) => ({
@@ -587,7 +831,6 @@ export default function Home() {
       }
     });
 
-    // 🥳 Lebegő Emoji-Ágyú és Hangpult fogadása a TV-n
     channel.on("broadcast", { event: "party_reaction" }, ({ payload }) => {
       if (isJoinedAsClient) return;
       if (payload?.emoji) {
@@ -606,7 +849,6 @@ export default function Home() {
       }
     });
 
-    // Mobil Házigazda Távirányító parancsok fogadása a TV-n
     channel.on("broadcast", { event: "remote_control" }, ({ payload }) => {
       if (isJoinedAsClient) return;
       const cmd = payload?.command;
@@ -623,9 +865,8 @@ export default function Home() {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [roomCode, isJoinedAsClient]);
+  }, [roomCode, isJoinedAsClient, playerName]);
 
-  // Házigazda Dupla vagy Semmi kapcsoló szinkronizálása
   const toggleDoubleOrNothingHost = () => {
     const nextVal = !doubleOrNothingEnabled;
     setDoubleOrNothingEnabled(nextVal);
@@ -637,6 +878,39 @@ export default function Home() {
           activeCategory: activeCategoryRef.current,
           targetType: activeCategoryRef.current?.targetType || "year",
           doubleOrNothingEnabled: nextVal,
+          strictQuizMode: strictQuizModeRef.current,
+        },
+      });
+    }
+  };
+
+  const toggleStrictQuizModeHost = () => {
+    const nextVal = !strictQuizMode;
+    setStrictQuizMode(nextVal);
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "game_state",
+        payload: {
+          activeCategory: activeCategoryRef.current,
+          targetType: activeCategoryRef.current?.targetType || "year",
+          doubleOrNothingEnabled: doubleOrNothingRef.current,
+          strictQuizMode: nextVal,
+        },
+      });
+    }
+  };
+
+  // Kézi +1 X kredit küldése a TV-ről (pl. Buzzerrel bemondott helyes válaszért)
+  const grantManualCreditToPlayer = (targetPlayerName: string) => {
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "award_credits",
+        payload: {
+          awards: {
+            [targetPlayerName]: { deltaCredits: 1, penalty: 0, reason: "Házigazda jóváhagyás" },
+          },
         },
       });
     }
@@ -700,8 +974,48 @@ export default function Home() {
     }
   };
 
+  // ================= 7. CSALÁSVÉDETT MOBIL TÁBLA KATTINTÁS (SZIGORÚ KVÍZ MÓD) =================
   const handleClientTileClick = (r: number, c: number) => {
-    const willBeMarked = !clientGrid[r][c];
+    const isCurrentlyMarked = clientGrid[r][c];
+    const willBeMarked = !isCurrentlyMarked;
+    const markedCount = clientGrid.flat().filter(Boolean).length;
+
+    if (strictQuizMode) {
+      if (willBeMarked) {
+        if (clientPenaltyDebt > 0 && markedCount > 0) {
+          alert("⚠️ Elbuktad a Dupla vagy Semmit! Először radírozz le 1 meglévő X-et a tábládról!");
+          return;
+        }
+        if (clientCredits <= 0) {
+          alert("🔒 Nincs szabad X lépésed! Találd el a feladványt a következő körben az X feloldásához!");
+          return;
+        }
+        // 1 kredit levonása
+        setClientCredits((prev) => {
+          const next = Math.max(0, prev - 1);
+          localStorage.setItem("hit_player_credits", String(next));
+          return next;
+        });
+      } else {
+        // Meglévő X levétele: ha büntetésben volt, letudja a büntetést; különben visszakapja a kreditet, hogy átrakja máshova
+        if (clientPenaltyDebt > 0) {
+          setClientPenaltyDebt((prev) => {
+            const next = Math.max(0, prev - 1);
+            localStorage.setItem("hit_player_debt", String(next));
+            return next;
+          });
+          setClientRewardBanner("✅ Büntetés letudva (1 X leradírozva)!");
+        } else {
+          setClientCredits((prev) => {
+            const next = prev + 1;
+            localStorage.setItem("hit_player_credits", String(next));
+            return next;
+          });
+        }
+      }
+    }
+
+    playMarkerSound(willBeMarked);
 
     if (typeof window !== "undefined" && "vibrate" in navigator) {
       try { navigator.vibrate(willBeMarked ? 35 : 15); } catch (_) {}
@@ -744,6 +1058,7 @@ export default function Home() {
     localStorage.setItem("hit_room_code", roomCode);
     setIsJoinModalOpen(false);
     setIsJoinedAsClient(true);
+    requestWakeLock();
 
     if (channelRef.current) {
       channelRef.current.send({
@@ -794,6 +1109,7 @@ export default function Home() {
           activeCategory: cat,
           targetType: cat.targetType,
           doubleOrNothingEnabled,
+          strictQuizMode,
           resetRound: true,
         },
       });
@@ -834,7 +1150,58 @@ export default function Home() {
     }
   };
 
-  // Kártya megfordítása + Éjszakai Statisztikák rögzítése
+  // ================= 6. FUZZY KIÉRTÉKELÉS ÉS 7. JUTALOM X KALKULÁCIÓ =================
+  const guessList = Object.values(roundGuesses);
+
+  const evaluatedGuesses = React.useMemo(() => {
+    if (!currentTrack) return [];
+    const catId = activeCategory?.id || "year";
+
+    return guessList
+      .map((g) => {
+        const yearDiff = Math.abs(g.year - currentTrack.year);
+        const titleMatch = isFuzzyTextMatch(g.text, currentTrack.title);
+        const artistMatch = isFuzzyTextMatch(g.text, currentTrack.artist);
+
+        // Kategória-függő győzelmi feltétel
+        let earnedRegularWin = false;
+        if (catId === "c_exact_year" || catId === "y_exact") {
+          earnedRegularWin = yearDiff === 0;
+        } else if (catId === "y_5") {
+          earnedRegularWin = yearDiff <= 5;
+        } else if (catId === "c_decade" || catId === "y_dec") {
+          earnedRegularWin = Math.floor(g.year / 10) === Math.floor(currentTrack.year / 10);
+        } else if (catId === "y_2000") {
+          earnedRegularWin = (g.year >= 2000) === (currentTrack.year >= 2000);
+        } else if (guessTarget === "title") {
+          earnedRegularWin = titleMatch;
+        } else if (guessTarget === "artist") {
+          earnedRegularWin = artistMatch;
+        } else if (guessTarget === "all") {
+          earnedRegularWin = yearDiff <= 2 && (titleMatch || artistMatch);
+        } else {
+          // Alapértelmezett évszám / szabad tipp: ±2 év eltérés VAGY eltalált cím/előadó
+          earnedRegularWin = yearDiff <= 2 || titleMatch || artistMatch;
+        }
+
+        const wonDouble = g.riskDouble && (yearDiff === 0 || titleMatch || artistMatch);
+        const earnedCredits = g.riskDouble ? (wonDouble ? 2 : 0) : earnedRegularWin ? 1 : 0;
+        const penalty = g.riskDouble && !wonDouble ? 1 : 0;
+
+        return {
+          ...g,
+          yearDiff,
+          titleMatch,
+          artistMatch,
+          wonDouble,
+          earnedRegularWin,
+          earnedCredits,
+          penalty,
+        };
+      })
+      .sort((a, b) => b.earnedCredits - a.earnedCredits || a.yearDiff - b.yearDiff || a.submittedAt - b.submittedAt);
+  }, [guessList, currentTrack, activeCategory, guessTarget]);
+
   const handleFlipAndShow = () => {
     const nextFlipped = !isFlipped;
     setIsFlipped(nextFlipped);
@@ -842,14 +1209,14 @@ export default function Home() {
       handleStop(false);
       confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
 
-      // Statisztikák mentése az adott dalra (egyszer)
+      // Statisztikák és Automata Jutalom X-ek kiküldése (dalonként egyszer)
       if (currentTrack && scoredTrackIdRef.current !== currentTrack.id) {
         scoredTrackIdRef.current = currentTrack.id;
-        const guesses = Object.values(roundGuesses);
-        if (guesses.length > 0) {
+
+        if (evaluatedGuesses.length > 0) {
           setSessionStats((prev) => {
             const next = { ...prev };
-            guesses.forEach((g) => {
+            evaluatedGuesses.forEach((g) => {
               const cur = next[g.playerName] || {
                 guessesCount: 0,
                 totalYearDiff: 0,
@@ -859,12 +1226,33 @@ export default function Home() {
               next[g.playerName] = {
                 ...cur,
                 guessesCount: cur.guessesCount + 1,
-                totalYearDiff: cur.totalYearDiff + Math.abs(g.year - currentTrack.year),
+                totalYearDiff: cur.totalYearDiff + g.yearDiff,
                 riskCount: cur.riskCount + (g.riskDouble ? 1 : 0),
               };
             });
             return next;
           });
+
+          // Jutalom X kreditek kiküldése a telefonokra
+          if (channelRef.current) {
+            const awards: Record<string, { deltaCredits: number; penalty: number; reason: string }> = {};
+            evaluatedGuesses.forEach((g) => {
+              if (g.earnedCredits > 0 || g.penalty > 0) {
+                awards[g.playerName] = {
+                  deltaCredits: g.earnedCredits,
+                  penalty: g.penalty,
+                  reason: g.wonDouble ? "Dupla vagy Semmi telitalálat!" : "Helyes tipp!",
+                };
+              }
+            });
+            if (Object.keys(awards).length > 0) {
+              channelRef.current.send({
+                type: "broadcast",
+                event: "award_credits",
+                payload: { awards, trackId: currentTrack.id },
+              });
+            }
+          }
         }
       }
     }
@@ -889,6 +1277,7 @@ export default function Home() {
 
   const handlePlayToggle = () => {
     if (!audioRef.current) return;
+    getSharedAudioContext();
     if (isPlaying) {
       handleStop(false);
     } else {
@@ -903,6 +1292,7 @@ export default function Home() {
     }
   };
 
+  // 4. AZONNALI VÁLTÁS AZ ELŐTÖLTÖTT DALRA + KÖVETKEZŐ ELŐSORSOLÁSA
   const handleNextTrack = () => {
     setIsFlipped(false);
     setBuzzedPlayer(null);
@@ -911,12 +1301,21 @@ export default function Home() {
     setAutoPlayCountdown(null);
     setTimeLeft(selectedDuration);
 
-    const nextIdx = pickNextRandomIndex(filteredTracks, currentTrack?.id);
-    setCurrentIndex(nextIdx);
+    const chosenIdx =
+      nextPreloadIndex >= 0 && nextPreloadIndex < filteredTracks.length
+        ? nextPreloadIndex
+        : computeCandidateIndex(filteredTracks, playedIds, currentTrack?.id);
 
-    if (audioRef.current) {
-      const nextTrack = filteredTracks[nextIdx];
-      const smartStart = smartIntroSkip ? getSmartStartTime(nextTrack?.lyrics) : 0;
+    const chosenTrack = filteredTracks[chosenIdx];
+    const updatedPlayed = chosenTrack ? [...playedIds, chosenTrack.id] : playedIds;
+    setPlayedIds(updatedPlayed);
+    setCurrentIndex(chosenIdx);
+
+    const upcomingIdx = computeCandidateIndex(filteredTracks, updatedPlayed, chosenTrack?.id);
+    setNextPreloadIndex(upcomingIdx);
+
+    if (audioRef.current && chosenTrack) {
+      const smartStart = smartIntroSkip ? getSmartStartTime(chosenTrack.lyrics) : 0;
       audioRef.current.currentTime = smartStart;
       setCurrentTime(smartStart);
     }
@@ -929,6 +1328,7 @@ export default function Home() {
           activeCategory: activeCategoryRef.current,
           targetType: activeCategoryRef.current?.targetType || "year",
           doubleOrNothingEnabled: doubleOrNothingRef.current,
+          strictQuizMode: strictQuizModeRef.current,
           resetRound: true,
         },
       });
@@ -946,7 +1346,6 @@ export default function Home() {
     });
   };
 
-  // Remote Handler referenciák frissítése
   useEffect(() => {
     remoteHandlersRef.current = {
       playToggle: handlePlayToggle,
@@ -992,6 +1391,9 @@ export default function Home() {
       } else if (e.code === "KeyR") {
         e.preventDefault();
         remoteHandlersRef.current.spin();
+      } else if (e.code === "KeyF") {
+        e.preventDefault();
+        toggleFullscreen();
       }
     };
 
@@ -1010,38 +1412,7 @@ export default function Home() {
   )}&bgcolor=171717&color=fbbf24`;
 
   const onlinePlayers = players.filter((p) => p.isOnline);
-  const guessList = Object.values(roundGuesses);
 
-  // Kahoot Rangsor Kiértékelése (+ Dupla vagy Semmi logikával)
-  const evaluatedGuesses = React.useMemo(() => {
-    if (!currentTrack) return [];
-    return guessList
-      .map((g) => {
-        const yearDiff = Math.abs(g.year - currentTrack.year);
-        const normText = g.text.toLowerCase();
-        const titleMatch =
-          normText.length >= 3 &&
-          (currentTrack.title.toLowerCase().includes(normText) ||
-            normText.includes(currentTrack.title.toLowerCase()));
-        const artistMatch =
-          normText.length >= 3 &&
-          (currentTrack.artist.toLowerCase().includes(normText) ||
-            normText.includes(currentTrack.artist.toLowerCase()));
-
-        const wonDouble = g.riskDouble && (yearDiff === 0 || titleMatch || artistMatch);
-
-        return {
-          ...g,
-          yearDiff,
-          titleMatch,
-          artistMatch,
-          wonDouble,
-        };
-      })
-      .sort((a, b) => a.yearDiff - b.yearDiff || a.submittedAt - b.submittedAt);
-  }, [guessList, currentTrack]);
-
-  // 🏆 PODIUM ÉS "AZ ESTE LEGJEI" KALKULÁCIÓ
   const podiumData = React.useMemo(() => {
     const rankedPlayers = [...players]
       .map((p) => ({
@@ -1052,7 +1423,6 @@ export default function Home() {
 
     const champion = rankedPlayers[0];
 
-    // Sniper (Legkisebb átlagos évszám-eltérés)
     let sniperName = "Még nincs tipp";
     let sniperDetail = "-";
     let bestAvg = Infinity;
@@ -1067,7 +1437,6 @@ export default function Home() {
       }
     });
 
-    // Leggyorsabb Kezű (Buzzer)
     let fastestName = "Még senki";
     let fastestDetail = "0 csengetés";
     let maxBuzz = 0;
@@ -1079,7 +1448,6 @@ export default function Home() {
       }
     });
 
-    // Legnagyobb Szerencsejátékos (Dupla vagy Semmi)
     let gamblerName = "Még senki";
     let gamblerDetail = "0 kockáztatás";
     let maxRisk = 0;
@@ -1116,6 +1484,11 @@ export default function Home() {
                 <h1 className="text-sm sm:text-base font-black text-amber-400 uppercase tracking-wider">
                   {playerName}
                 </h1>
+                {wakeLockActive && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                    🔆 Ébren
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-neutral-500 font-mono">
                 SZOBA: {roomCode} • PONT: {clientGrid.flat().filter(Boolean).length}/25
@@ -1143,7 +1516,12 @@ export default function Home() {
               </button>
               <button
                 onClick={() => {
-                  localStorage.clear();
+                  localStorage.removeItem("hit_player_name");
+                  localStorage.removeItem("hit_room_code");
+                  localStorage.removeItem("hit_player_grid");
+                  localStorage.removeItem("hit_player_notes");
+                  localStorage.removeItem("hit_player_credits");
+                  localStorage.removeItem("hit_player_debt");
                   setIsJoinedAsClient(false);
                 }}
                 className="text-xs text-neutral-500 hover:text-rose-400 px-2 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 transition"
@@ -1153,7 +1531,6 @@ export default function Home() {
             </div>
           </header>
 
-          {/* 👑 LENYITHATÓ MOBIL HÁZIGAZDA TÁVIRÁNYÍTÓ PANEL */}
           {isRemoteOpen && (
             <div className="w-full max-w-sm bg-neutral-900/95 border-2 border-amber-500/40 rounded-2xl p-3 my-1.5 shadow-2xl flex flex-col gap-2">
               <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-amber-400">
@@ -1220,12 +1597,17 @@ export default function Home() {
             </div>
           )}
 
+          {clientRewardBanner && (
+            <div className="w-full max-w-sm py-2 px-3 rounded-xl bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-black text-center animate-bounce">
+              {clientRewardBanner}
+            </div>
+          )}
+
           <div className="w-full max-w-sm flex flex-col gap-2 my-auto">
-            {/* 🎯 KAHOOT VAK TIPPELŐ + 🎰 DUPLA VAGY SEMMI PANEL */}
             <div className="w-full bg-neutral-900 border-2 border-neutral-800 rounded-2xl p-3 shadow-xl flex flex-col gap-2">
               <div className="flex justify-between items-center">
                 <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                  🎯 Titkos Tipp a TV-re
+                  🎯 Titkos Tipp a TV-re (Ékezettűrő)
                 </span>
                 {isGuessLocked && (
                   <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
@@ -1271,7 +1653,6 @@ export default function Home() {
                 className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
               />
 
-              {/* 🎰 DUPLA VAGY SEMMI GOMB (HA A HÁZIGAZDA ENGEDÉLYEZTE) */}
               {doubleOrNothingEnabled && (
                 <button
                   type="button"
@@ -1303,7 +1684,7 @@ export default function Home() {
                     setIsGuessLocked(false);
                     setClientGuessText(e.target.value);
                   }}
-                  placeholder="Előadó / Dalcím tipp..."
+                  placeholder="Előadó / Dalcím (ékezet nélkül is jó)..."
                   className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
                 />
                 <button
@@ -1320,7 +1701,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 🥳 ÉLŐ EMOJI-ÁGYÚ ÉS HANGPULT (PARTY SOUNDBOARD) */}
             <div className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-2 flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-1">
                 {["🔥", "💃", "🤯", "😂", "🍅"].map((emoji) => (
@@ -1328,7 +1708,6 @@ export default function Home() {
                     key={emoji}
                     onClick={() => sendClientReaction(emoji)}
                     className="flex-1 py-1.5 rounded-xl bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-lg active:scale-90 transition"
-                    title="Emoji felküldése a TV-re"
                   >
                     {emoji}
                   </button>
@@ -1362,7 +1741,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* MOBIL GYORSASÁGI BUZZER GOMB */}
             <button
               onClick={handleClientBuzzer}
               className="w-full py-2 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-600/30 active:scale-95 transition flex items-center justify-center gap-2"
@@ -1371,7 +1749,30 @@ export default function Home() {
               <span>🔔 TUDOM! (Buzzer megnyomása)</span>
             </button>
 
-            <div className="bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-2.5 shadow-2xl">
+            {/* 7. SZIGORÚ KVÍZ MÓD ÁLLAPOTJELZŐ A TÁBLA FELETT */}
+            <div className="bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-2.5 shadow-2xl flex flex-col gap-2">
+              {strictQuizMode && (
+                <div className="flex items-center justify-between px-2 py-1 rounded-xl bg-neutral-950 border border-neutral-800 text-[11px] font-bold">
+                  <span className="flex items-center gap-1 text-neutral-300">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Szigorú Kvíz Mód:</span>
+                  </span>
+                  {clientPenaltyDebt > 0 ? (
+                    <span className="text-rose-400 font-black animate-pulse">
+                      ⚠️ Radírozz le {clientPenaltyDebt} db X-et!
+                    </span>
+                  ) : clientCredits > 0 ? (
+                    <span className="text-emerald-400 font-black">
+                      ✅ {clientCredits} db szabad X lépésed van!
+                    </span>
+                  ) : (
+                    <span className="text-amber-400/90 font-mono text-[10px]">
+                      🔒 0 X kredit (Találd el a dalt!)
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2 rounded-2xl border border-neutral-800">
                 {clientGrid.map((row, r) =>
                   row.map((isMarked, c) => {
@@ -1433,7 +1834,6 @@ export default function Home() {
             style={{ backgroundColor: currentAccent }}
           />
 
-          {/* 🥳 LEBEGŐ EMOJI-ÁGYÚ RÉTEG A TV KÉPERNYŐN */}
           <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
             <AnimatePresence>
               {floatingReactions.map((r) => (
@@ -1460,9 +1860,19 @@ export default function Home() {
           {/* FEJLÉC */}
           <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10">
             <div>
-              <h1 className="text-lg sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
-                HIT-ROULETTE
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
+                  HIT-ROULETTE
+                </h1>
+                {wakeLockActive && (
+                  <span
+                    className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold"
+                    title="Képernyő-ébrentartás aktív (nem alszik el a TV és a telefon)"
+                  >
+                    🔆 Ébren
+                  </span>
+                )}
+              </div>
               <p className="text-[9px] sm:text-[10px] text-neutral-500 tracking-wider">A HITSTER PARTI KIADÁS</p>
             </div>
 
@@ -1503,7 +1913,21 @@ export default function Home() {
                 <span>{smartIntroSkip ? "BE" : "KI"}</span>
               </button>
 
-              {/* 🎰 KIKAPCSOLHATÓ DUPLA VAGY SEMMI OPCIÓ A HÁZIGAZDÁNAK */}
+              {/* 7. SZIGORÚ KVÍZ MÓD KAPCSOLÓ */}
+              <button
+                onClick={toggleStrictQuizModeHost}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  strictQuizMode
+                    ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-300"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="Szigorú Kvíz Mód: A játékosok csak helyes tipp után kapnak X lépést a telefonjukra"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">Szigorú Kvíz:</span>
+                <span>{strictQuizMode ? "BE" : "KI"}</span>
+              </button>
+
               <button
                 onClick={toggleDoubleOrNothingHost}
                 className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
@@ -1511,24 +1935,11 @@ export default function Home() {
                     ? "bg-purple-500/15 border-purple-500/50 text-purple-300"
                     : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
                 }`}
-                title="Dupla vagy Semmi kockáztatás engedélyezése vagy letiltása a telefonokon"
+                title="Dupla vagy Semmi kockáztatás engedélyezése vagy letiltása"
               >
                 <Dices className="w-3.5 h-3.5" />
                 <span className="hidden lg:inline">Dupla/Semmi:</span>
                 <span>{doubleOrNothingEnabled ? "BE" : "KI"}</span>
-              </button>
-
-              <button
-                onClick={() => setAutoSwitchTab((prev) => !prev)}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
-                  autoSwitchTab
-                    ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
-                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
-                }`}
-              >
-                <Tv className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">Auto lap:</span>
-                <span>{autoSwitchTab ? "BE" : "KI"}</span>
               </button>
 
               <button
@@ -1541,6 +1952,19 @@ export default function Home() {
               >
                 <SlidersHorizontal className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Szűrők</span>
+              </button>
+
+              <button
+                onClick={toggleFullscreen}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  isFullscreen
+                    ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-300"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white"
+                }`}
+                title="Teljes Képernyő / Mozimód (F)"
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                <span className="hidden md:inline">{isFullscreen ? "Ablakos" : "Teljes Képernyő"}</span>
               </button>
 
               <button
@@ -1557,11 +1981,9 @@ export default function Home() {
                 )}
               </button>
 
-              {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & DÍJÁTADÓ GOMB */}
               <button
                 onClick={handleOpenPodium}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-neutral-950 text-xs font-black shadow-lg hover:scale-105 active:scale-95 transition"
-                title="Parti Lezárása & Az Este Legjei Díjátadó"
               >
                 <Trophy className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Díjátadó</span>
@@ -1709,6 +2131,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* 4. FŐ LEJÁTSZÓ HIBAKEZELÉSSEL + MÁSODLAGOS REJTETT PRELOAD LEJÁTSZÓ */}
           <audio
             ref={audioRef}
             src={currentTrack?.audioUrl}
@@ -1726,7 +2149,15 @@ export default function Home() {
               setIsPlaying(false);
               setCurrentTime(0);
             }}
+            onError={() => {
+              console.warn("Hiba az audió betöltésekor, automatikus ugrás a következő dalra:", currentTrack?.id);
+              handleNextTrack();
+            }}
           />
+
+          {nextPreloadTrack && nextPreloadTrack.id !== currentTrack?.id && (
+            <audio preload="auto" src={nextPreloadTrack.audioUrl} className="hidden" />
+          )}
 
           {autoPlayCountdown !== null && (
             <div className="fixed top-20 z-50 flex items-center gap-3 px-6 py-2.5 rounded-full bg-amber-500 text-neutral-950 font-black shadow-2xl animate-bounce">
@@ -1741,9 +2172,20 @@ export default function Home() {
               <span className="text-sm sm:text-base uppercase tracking-wider">
                 🔔 {buzzedPlayer} CSENGETETT ELSŐKÉNT!
               </span>
+              {strictQuizMode && (
+                <button
+                  onClick={() => {
+                    grantManualCreditToPlayer(buzzedPlayer);
+                    setBuzzedPlayer(null);
+                  }}
+                  className="px-3 py-1 rounded-xl bg-emerald-500 text-neutral-950 text-xs font-black hover:bg-emerald-400 transition"
+                >
+                  ✅ Helyes (+1 X küldése)
+                </button>
+              )}
               <button
                 onClick={() => setBuzzedPlayer(null)}
-                className="ml-2 p-1 rounded-lg bg-black/30 hover:bg-black/50"
+                className="ml-1 p-1 rounded-lg bg-black/30 hover:bg-black/50"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1777,7 +2219,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* TV: KIK KÜLDTÉK MÁR BE A VAK TIPPET (MEGFORDÍTÁS ELŐTT) */}
               {!isFlipped && guessList.length > 0 && (
                 <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-neutral-900/90 border border-emerald-500/40 text-xs">
                   <Lock className="w-3.5 h-3.5 text-emerald-400" />
@@ -1801,7 +2242,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* 🏆 KAHOOT + DUPLA VAGY SEMMI AUTOMATA KIÉRTÉKELÉS PANEL */}
             {isFlipped && evaluatedGuesses.length > 0 && (
               <div className="w-full max-w-3xl bg-neutral-900/95 border-2 border-amber-400 rounded-3xl p-4 mb-4 shadow-[0_0_50px_rgba(245,158,11,0.25)] animate-in fade-in zoom-in-95 duration-300">
                 <div className="flex items-center justify-between border-b border-neutral-800 pb-2 mb-3">
@@ -1826,7 +2266,7 @@ export default function Home() {
                       <div
                         key={g.playerName}
                         className={`flex items-center justify-between p-2.5 rounded-2xl border ${
-                          isExact
+                          isExact || g.earnedCredits > 0
                             ? "bg-amber-500/20 border-amber-400 text-amber-200"
                             : isClose2
                             ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
@@ -1840,38 +2280,53 @@ export default function Home() {
                             {isExact ? "🥇" : isClose2 ? "🥈" : isClose5 ? "🥉" : "❌"}
                           </span>
                           <div>
-                            <div className="font-black text-xs uppercase text-white flex items-center gap-1.5">
+                            <div className="font-black text-xs uppercase text-white flex items-center gap-1.5 flex-wrap">
                               <span>
                                 {idx + 1}. {g.playerName}
                               </span>
-                              {g.riskDouble && (
+                              {g.riskDouble ? (
                                 <span
                                   className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
-                                    g.wonDouble
-                                      ? "bg-amber-400 text-neutral-950"
-                                      : "bg-rose-600 text-white"
+                                    g.wonDouble ? "bg-amber-400 text-neutral-950" : "bg-rose-600 text-white"
                                   }`}
                                 >
                                   {g.wonDouble ? "🎰 DUPLA (+2 X)" : "💀 BUKTA (-1 X)"}
                                 </span>
+                              ) : (
+                                g.earnedCredits > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-neutral-950 text-[9px] font-black">
+                                    +{g.earnedCredits} X KREDIT
+                                  </span>
+                                )
                               )}
                             </div>
                             {g.text && (
                               <div className="text-[10px] text-neutral-300">
                                 Tipp: „{g.text}”{" "}
                                 {(g.titleMatch || g.artistMatch) && (
-                                  <span className="text-emerald-400 font-bold">(Találat! 🎯)</span>
+                                  <span className="text-emerald-400 font-bold">(Fuzzy Találat! 🎯)</span>
                                 )}
                               </div>
                             )}
                           </div>
                         </div>
 
-                        <div className="text-right font-mono">
-                          <div className="text-sm font-black">{g.year}</div>
-                          <div className="text-[10px] font-bold">
-                            {isExact ? "TELITALÁLAT!" : `±${g.yearDiff} év eltérés`}
+                        <div className="flex items-center gap-2">
+                          <div className="text-right font-mono">
+                            <div className="text-sm font-black">{g.year}</div>
+                            <div className="text-[10px] font-bold">
+                              {isExact ? "TELITALÁLAT!" : `±${g.yearDiff} év`}
+                            </div>
                           </div>
+                          {strictQuizMode && (
+                            <button
+                              onClick={() => grantManualCreditToPlayer(g.playerName)}
+                              className="p-1.5 rounded-lg bg-neutral-800 hover:bg-emerald-500 hover:text-neutral-950 text-emerald-400 transition text-[10px] font-black"
+                              title="Plusz 1 X lépés küldése a játékos telefonjára"
+                            >
+                              +1 X
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -1921,7 +2376,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* 🎧 32-SÁVOS NEON SPECTRUM ANALYZER ÉS DOKKOLÓ */}
           <div className="w-full flex flex-col items-center z-10">
             <NeonEqualizerBar isPlaying={isPlaying} accentColor={currentAccent} />
 
@@ -1962,7 +2416,7 @@ export default function Home() {
             </footer>
           </div>
 
-          {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & "AZ ESTE LEGJEI" DÍJÁTADÓ MODAL */}
+          {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & DÍJÁTADÓ MODAL */}
           {isPodiumOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg overflow-y-auto">
               <motion.div
@@ -1988,7 +2442,6 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* TOP 3 DOBOGÓ */}
                 <div className="w-full grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-2">
                   {podiumData.top3.map((p, idx) => {
                     const medals = ["🥇 1. HELY", "🥈 2. HELY", "🥉 3. HELY"];
@@ -2016,7 +2469,6 @@ export default function Home() {
                   })}
                 </div>
 
-                {/* 4 KÜLÖNDÍJ KÁRTYA ("AZ ESTE LEGJEI") */}
                 <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
                   <div className="p-4 rounded-2xl bg-neutral-950 border border-amber-500/40 flex items-center gap-3.5">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-2xl shrink-0">
@@ -2091,7 +2543,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* TV QR KÓD MODAL */}
+          {/* TV QR KÓD MODAL + ÚJ PARTI RESET GOMBBAL */}
           {isHostModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
               <div className="w-full max-w-sm bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-4 text-center">
@@ -2131,6 +2583,14 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+
+                <button
+                  onClick={handleResetHostSession}
+                  className="w-full py-2 px-3 rounded-xl bg-neutral-950 hover:bg-rose-950/40 border border-neutral-800 hover:border-rose-500/40 text-neutral-400 hover:text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Új Szobakód & Táblák Nullázása</span>
+                </button>
               </div>
             </div>
           )}

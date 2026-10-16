@@ -41,7 +41,6 @@ export const checkBingo = (grid: boolean[][]): boolean => {
   return false;
 };
 
-// Megkeresi a nyertes cellákat, hogy arany kerettel világítsanak
 const getWinningCells = (grid: boolean[][]): Set<string> => {
   const winning = new Set<string>();
   for (let r = 0; r < 5; r++) {
@@ -55,11 +54,26 @@ const getWinningCells = (grid: boolean[][]): Set<string> => {
   return winning;
 };
 
-const playMarkerSound = (isMarking: boolean) => {
+// ================= SINGLETON WEB AUDIO MOTOR =================
+export const getSharedAudioContext = (): AudioContext | null => {
+  if (typeof window === "undefined") return null;
+  const win = window as any;
+  if (!win.__hitsterAudioCtx) {
+    const AudioCtx = window.AudioContext || win.webkitAudioContext;
+    if (AudioCtx) {
+      win.__hitsterAudioCtx = new AudioCtx();
+    }
+  }
+  if (win.__hitsterAudioCtx && win.__hitsterAudioCtx.state === "suspended") {
+    win.__hitsterAudioCtx.resume().catch(() => {});
+  }
+  return win.__hitsterAudioCtx || null;
+};
+
+export const playMarkerSound = (isMarking: boolean) => {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -185,7 +199,6 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
 
   return (
     <div className="w-full max-w-5xl flex flex-col items-center gap-4 px-2">
-      {/* GYŐZELMI ÉRTESÍTŐ */}
       {winnerAlert && (
         <div className="w-full max-w-xl bg-gradient-to-r from-amber-500/20 via-rose-500/20 to-violet-500/20 border-2 border-amber-400 p-4 rounded-2xl flex items-center justify-between shadow-2xl backdrop-blur-md animate-bounce">
           <div className="flex items-center gap-3">
@@ -208,7 +221,6 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
         </div>
       )}
 
-      {/* FELSŐ VEZÉRLŐSÁV: PÖRGETÉS & JÁTÉKOS FÜLEK */}
       <div className="w-full max-w-xl flex flex-col gap-3">
         {onStartSpinAndMusic && (
           <button
@@ -273,7 +285,6 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
         </div>
       </div>
 
-      {/* NÉZET 1: TV MULTI-BOARD ÁTTEKINTŐ (MINDEN JÁTÉKOS EGYSZERRE) */}
       {showAllBoards ? (
         <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
           {players.map((player, pIdx) => {
@@ -336,7 +347,6 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           })}
         </div>
       ) : (
-        /* NÉZET 2: FÓKUSZÁLT EGYÉNI HITSTER TÁBLA */
         <div className="relative w-full max-w-sm rounded-[32px] bg-neutral-900 border-4 border-neutral-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-4 sm:p-5 flex flex-col items-center gap-3.5">
           <div className="w-full flex justify-between items-center px-1">
             <div className="flex items-center gap-1.5">

@@ -1,0 +1,10 @@
+{
+  "name": "Hit-Roulette • Hitster Parti Kiadás",
+  "short_name": "Hit-Roulette",
+  "description": "Interaktív zenés kvíz és Hitster Bingó parti játék TV-re és mobilra.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#f59e0b",
+  "orientation": "portrait"
+}

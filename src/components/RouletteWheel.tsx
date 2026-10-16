@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette } from "lucide-react";
 import confetti from "canvas-confetti";
+import { getSharedAudioContext } from "./PlayerBoard";
 
 export type TargetHighlight = "year" | "title" | "artist" | "all";
 
@@ -117,8 +118,10 @@ const splitLabelToLines = (text: string): [string, string] => {
   return [parts.slice(0, mid).join(" ").toUpperCase(), parts.slice(mid).join(" ").toUpperCase()];
 };
 
-const playClickTone = (audioCtx: AudioContext) => {
+const playClickTone = () => {
   try {
+    const audioCtx = getSharedAudioContext();
+    if (!audioCtx) return;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = "triangle";
@@ -133,8 +136,10 @@ const playClickTone = (audioCtx: AudioContext) => {
   } catch (_) {}
 };
 
-const playFanfareTone = (audioCtx: AudioContext) => {
+const playFanfareTone = () => {
   try {
+    const audioCtx = getSharedAudioContext();
+    if (!audioCtx) return;
     const notes = [523.25, 659.25, 783.99, 1046.50];
     notes.forEach((freq, idx) => {
       const osc = audioCtx.createOscillator();
@@ -164,8 +169,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   const [winner, setWinner] = useState<Category | null>(null);
   const [discoStep, setDiscoStep] = useState(0);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -193,13 +196,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   const spin = () => {
     if (isSpinning || categories.length === 0) return;
 
-    if (!audioCtxRef.current) {
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtxClass) audioCtxRef.current = new AudioCtxClass();
-    }
-    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
-      audioCtxRef.current.resume();
-    }
+    getSharedAudioContext();
 
     setIsSpinning(true);
     setWinner(null);
@@ -216,23 +213,21 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
 
     setRotation(finalRotation);
 
-    if (audioCtxRef.current) {
-      const delays = [
-        60, 110, 160, 210, 260, 310, 360, 420, 480, 550, 630, 720, 820, 930, 1050, 1200, 1400, 1650, 1950, 2300, 2700, 3150, 3650
-      ];
-      delays.forEach((d) => {
-        if (d < 4000) {
-          setTimeout(() => {
-            if (audioCtxRef.current) playClickTone(audioCtxRef.current);
-          }, d);
-        }
-      });
-    }
+    const delays = [
+      60, 110, 160, 210, 260, 310, 360, 420, 480, 550, 630, 720, 820, 930, 1050, 1200, 1400, 1650, 1950, 2300, 2700, 3150, 3650
+    ];
+    delays.forEach((d) => {
+      if (d < 4000) {
+        setTimeout(() => {
+          playClickTone();
+        }, d);
+      }
+    });
 
     setTimeout(() => {
       setIsSpinning(false);
       setWinner(selected);
-      if (audioCtxRef.current) playFanfareTone(audioCtxRef.current);
+      playFanfareTone();
       if (onSpinEnd) onSpinEnd(selected);
 
       confetti({
