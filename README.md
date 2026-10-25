@@ -41,6 +41,9 @@ A **Hit-Roulette** egy modern, böngészőből futtatható parti társasjáték,
 | **Audio Fade-In / Fade-Out** | Finom 1.5 másodperces hangerő-felfutás és elhalkulás leállításkor vagy az időzítő lejártakor (nincs recsegő hirtelen vágás). |
 | **Következő dal előtöltése** | A háttérben azonnal előkészíti és puffereli a következő kör dalát a folyamatos játékélményért. |
 | **Szigorú Kvíz Mód & Csalásvédelem** | Automatikus pontszámítás: csak az tehet le X-et a táblájára, aki helyesen tippel. A sikertelen „Dupla vagy Semmi” büntetéssel jár (radírozás). |
+| **Kipörgetett Színhez Kötött X Behúzás** | Csak a kerekén kipörgetett kategória színével megegyező mezőkre tehető X. A többi mező zárolt és halványított, a megfelelő mezők pulzáló fénnyel vezetnek. |
+| **Pörgetési Zár (Kihagyás- & Csalásvédelem)** | Ha van olyan játékos, aki még nem húzta be a megérdemelt X-et (vagy nem vonta le a büntetést), a kerék nem indulhat el; figyelmeztető ablak és mobil rezgés ébreszti. |
+| **Részletes Díjátadó & Karakter Különdíjak** | 8 egyedi különdíj (👑 Bajnok, 🎯 Sniper, ⚡ Villámagyú reakcióidő, 🤔 Taktikus átíró, ⏳ Időutazó mellélövés dalcímmel, 🔔 Buzzer, 🎲 Kaszinó királya, 💀 Főnix) + Részletes Játékos Kartoték és statisztikai táblázat. |
 | **Fuzzy Levenshtein értékelés** | Ékezetmentesítő, írásjel-eltávolító és 75%-os elgépeléstűrő Levenshtein távolság motor a szöveges tippekhez. |
 | **Web Audio szintézis** | Zéró külső hangfájl terhelés: minden kattanás, csilingelés, légkürt, fanfár és harsona közvetlenül a böngésző AudioContext oszcillátoraival generálódik. |
 | **Anti-F5 és Wake Lock** | A játékállás, kreditek és pontok folyamatosan mentődnek `localStorage`-ba; a telefon képernyője nem alszik el a parti közben (Screen Wake Lock API). |

@@ -6,13 +6,29 @@ import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone, Eraser, La
 import confetti from "canvas-confetti";
 import { Category } from "./RouletteWheel";
 
-const TILE_COLORS = [
-  "#f59e0b", // Sárga
-  "#10b981", // Zöld
-  "#ec4899", // Rózsaszín
-  "#8b5cf6", // Lila
-  "#06b6d4", // Kék
+export const TILE_COLORS = [
+  "#f59e0b", // Sárga (Évszám)
+  "#10b981", // Zöld (Dalcím)
+  "#ec4899", // Rózsaszín (Előadó)
+  "#8b5cf6", // Lila (Mindent bele)
+  "#06b6d4", // Kék (Szabad tipp / Bónusz)
 ];
+
+// 🎨 Pörgetett kategória színindexének lekérése (0..4, vagy -1 ha joker/bónusz/bármelyik)
+export const getCategoryColorIndex = (cat?: Category | null): number => {
+  if (!cat) return -1;
+  if (cat.id === "bonus" || cat.label?.toLowerCase().includes("szabad") || cat.label?.toLowerCase().includes("joker")) {
+    return -1;
+  }
+  const accent = cat.accent?.toLowerCase();
+  const foundIdx = TILE_COLORS.findIndex((c) => c.toLowerCase() === accent);
+  if (foundIdx !== -1) return foundIdx;
+  if (cat.targetType === "year") return 0;
+  if (cat.targetType === "title") return 1;
+  if (cat.targetType === "artist") return 2;
+  if (cat.targetType === "all") return 3;
+  return -1;
+};
 
 export interface PlayerData {
   id: string;
@@ -22,6 +38,8 @@ export interface PlayerData {
   colorGrid?: number[][]; // 5x5 mátrix a színek indexeivel (0..4)
   hasWon: boolean;
   isOnline?: boolean;
+  credits?: number; // még behúzandó X lépések
+  debt?: number;    // büntetésből radírozandó X
 }
 
 // 🎲 Kiegyensúlyozott véletlenszerű 5x5 táblagenerátor (minden színből pontosan 5 db)
@@ -138,6 +156,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   setActivePlayerIdx,
   onStartSpinAndMusic,
   isPlayingMusic,
+  activeCategory = null,
   tvMode = false,
   tvScale = 100,
 }) => {
@@ -150,6 +169,15 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     const targetPlayer = players[targetPlayerIdx];
     if (!targetPlayer) return;
     const willBeMarked = !targetPlayer.grid[rIdx][cIdx];
+
+    const targetColorIdx = getCategoryColorIndex(activeCategory);
+    const tileColorIdx = targetPlayer.colorGrid?.[rIdx]?.[cIdx] ?? ((rIdx + cIdx) % TILE_COLORS.length);
+
+    // ⛔ CSALÁSVÉDELEM: Csak a pörgetett színre engedélyezett az X behúzása!
+    if (willBeMarked && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
+      alert(`⛔ Csak a pörgetett kategória színére (${activeCategory?.label || "Kiválasztott szín"}) tehetsz X-et!`);
+      return;
+    }
 
     playMarkerSound(willBeMarked);
 
@@ -360,8 +388,13 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                   {player.grid.map((row, r) =>
                     row.map((isMarked, c) => {
                       const isWinTile = pWinCells.has(`${r}-${c}`);
-                        const colorIdx = player.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
-                        return (
+                      const colorIdx = player.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
+                      const targetColorIdx = getCategoryColorIndex(activeCategory);
+                      const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx;
+                      const isHighlight = !isMarked && targetColorIdx !== -1 && isTargetColor;
+                      const isDimmed = !isMarked && targetColorIdx !== -1 && !isTargetColor;
+
+                      return (
                         <button
                           key={`${r}-${c}`}
                           onClick={(e) => {
@@ -370,6 +403,10 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                           }}
                           className={`aspect-square rounded-lg flex items-center justify-center font-black text-lg text-neutral-950 transition ${
                             isWinTile ? "ring-2 ring-white scale-105 z-10" : ""
+                          } ${
+                            isHighlight ? "ring-2 ring-white shadow-[0_0_10px_rgba(255,255,255,0.7)] animate-pulse" : ""
+                          } ${
+                            isDimmed ? "opacity-35 hover:opacity-50 cursor-not-allowed" : ""
                           }`}
                           style={{ backgroundColor: TILE_COLORS[colorIdx] }}
                         >
@@ -423,18 +460,38 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
             </div>
           </div>
 
+          {/* 🎯 AKTÍV PÖRGETETT SZÍN JELZŐSÁV */}
+          {activeCategory && (
+            <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-neutral-950 border border-neutral-800 text-xs">
+              <span className="text-neutral-400 font-medium">Pörgetett kategória:</span>
+              <span className="font-black uppercase flex items-center gap-1.5" style={{ color: activeCategory.accent }}>
+                <span className="w-2.5 h-2.5 rounded-full inline-block shadow-sm" style={{ backgroundColor: activeCategory.accent }} />
+                {activeCategory.label}
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800/80">
             {currentPlayer.grid.map((row, r) =>
               row.map((isMarked, c) => {
                 const colorIdx = currentPlayer.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
                 const color = TILE_COLORS[colorIdx];
                 const isWinCell = winningCells.has(`${r}-${c}`);
+                const targetColorIdx = getCategoryColorIndex(activeCategory);
+                const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx;
+                const isHighlight = !isMarked && targetColorIdx !== -1 && isTargetColor;
+                const isDimmed = !isMarked && targetColorIdx !== -1 && !isTargetColor;
+
                 return (
                   <button
                     key={`${r}-${c}`}
                     onClick={() => toggleCell(activePlayerIdx, r, c)}
                     className={`aspect-square rounded-xl flex items-center justify-center relative transition transform active:scale-90 shadow select-none overflow-hidden ${
                       isWinCell ? "ring-4 ring-white shadow-[0_0_15px_#ffffff] scale-105 z-10" : ""
+                    } ${
+                      isHighlight ? "ring-2 ring-white shadow-[0_0_14px_rgba(255,255,255,0.7)] animate-pulse scale-102" : ""
+                    } ${
+                      isDimmed ? "opacity-35 hover:opacity-50 cursor-not-allowed" : ""
                     }`}
                     style={{ backgroundColor: color }}
                   >

@@ -160,6 +160,7 @@ const playFanfareTone = () => {
 
 interface RouletteWheelProps {
   onSpinEnd?: (selectedCategory: Category) => void;
+  onBeforeSpin?: () => boolean;
   tvMode?: boolean;
   tvScale?: number;
   customWheelSize?: number;
@@ -167,6 +168,7 @@ interface RouletteWheelProps {
 
 export const RouletteWheel: React.FC<RouletteWheelProps> = ({
   onSpinEnd,
+  onBeforeSpin,
   tvMode = false,
   tvScale = 100,
   customWheelSize,
@@ -204,6 +206,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
 
   const spin = () => {
     if (isSpinning || categories.length === 0) return;
+    if (onBeforeSpin && !onBeforeSpin()) return;
 
     getSharedAudioContext();
 

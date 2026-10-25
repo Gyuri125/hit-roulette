@@ -11,6 +11,7 @@ import {
   PlayerData,
   createEmptyGrid,
   generateRandomColorGrid,
+  getCategoryColorIndex,
   checkBingo,
   getSharedAudioContext,
   playMarkerSound,
@@ -53,12 +54,13 @@ import {
   ShieldCheck,
   Plus,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
 const TIME_OPTIONS = [15, 30, 45, 60, 0];
 type MusicFilter = "all" | "hungarian" | "international";
-type SoundEffectType = "airhorn" | "crickets" | "trombone" | "drumroll";
+type SoundEffectType = "airhorn" | "crickets" | "trombone" | "drumroll" | "fanfare";
 
 interface PlayerGuess {
   playerName: string;
@@ -78,8 +80,16 @@ interface FloatingReaction {
 interface PlayerSessionStats {
   guessesCount: number;
   totalYearDiff: number;
+  maxYearDiff: number;
+  maxYearDiffSong?: string;
+  exactYearCount: number;
   buzzerCount: number;
   riskCount: number;
+  riskWonCount: number;
+  riskLostCount: number;
+  editCount: number;
+  totalResponseTimeMs: number;
+  fastestResponseTimeMs: number;
 }
 
 const getFirstLyricTime = (lyrics?: string): number => {
@@ -261,6 +271,27 @@ const playPartySoundEffect = (effect: SoundEffectType) => {
       endGain.connect(ctx.destination);
       endOsc.start(endTime);
       endOsc.stop(endTime + 0.5);
+    } else if (effect === "fanfare") {
+      const notes = [
+        { f: 523.25, start: 0, dur: 0.15 },
+        { f: 523.25, start: 0.15, dur: 0.15 },
+        { f: 523.25, start: 0.3, dur: 0.15 },
+        { f: 659.25, start: 0.45, dur: 0.35 },
+        { f: 783.99, start: 0.8, dur: 0.6 },
+      ];
+      notes.forEach((n) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const st = ctx.currentTime + n.start;
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(n.f, st);
+        gain.gain.setValueAtTime(0.2, st);
+        gain.gain.exponentialRampToValueAtTime(0.001, st + n.dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(st);
+        osc.stop(st + n.dur);
+      });
     }
   } catch (_) {}
 };
@@ -603,8 +634,41 @@ export default function Home() {
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
   const [sessionStats, setSessionStats] = useState<Record<string, PlayerSessionStats>>({});
   const [isPodiumOpen, setIsPodiumOpen] = useState<boolean>(false);
+  const [podiumTab, setPodiumTab] = useState<"awards" | "stats">("awards");
+  const [pendingMarksModalOpen, setPendingMarksModalOpen] = useState<boolean>(false);
+  const roundStartTimeRef = useRef<number>(Date.now());
   const scoredTrackIdRef = useRef<string | number | null>(null);
   const hostHydratedRef = useRef<boolean>(false);
+
+  // Akiknél még fel nem használt X lépés vagy büntetés tartozás van
+  const pendingPlayers = React.useMemo(() => {
+    return players.filter((p) => (p.credits ?? 0) > 0 || (p.debt ?? 0) > 0);
+  }, [players]);
+
+  // 🎡 Pörgetés indítása csalás- és kihagyásvédelemmel
+  const handleAttemptSpin = (force = false): boolean => {
+    if (!force && pendingPlayers.length > 0) {
+      setPendingMarksModalOpen(true);
+      return false;
+    }
+    setPendingMarksModalOpen(false);
+    setActiveTab("game");
+    setIsFlipped(false);
+    setTimeout(() => {
+      document.querySelector<HTMLButtonElement>("#roulette-spin-btn")?.click();
+    }, 150);
+    return true;
+  };
+
+  const handlePingPendingPlayers = () => {
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "ping_pending_marks",
+        payload: {},
+      });
+    }
+  };
 
   const channelRef = useRef<any>(null);
   const activeCategoryRef = useRef<Category | null>(null);
@@ -931,6 +995,8 @@ export default function Home() {
             notes: payload.notes,
             hasWon: payload.hasWon,
             isOnline: true,
+            credits: payload.credits !== undefined ? payload.credits : updated[existingIdx].credits,
+            debt: payload.debt !== undefined ? payload.debt : updated[existingIdx].debt,
           };
           return updated;
         } else {
@@ -944,6 +1010,8 @@ export default function Home() {
               colorGrid: payload.colorGrid || generateRandomColorGrid(),
               hasWon: payload.hasWon || false,
               isOnline: true,
+              credits: payload.credits ?? 0,
+              debt: payload.debt ?? 0,
             },
           ];
         }
@@ -978,6 +1046,18 @@ export default function Home() {
         setClientGuessText("");
         setClientRiskDouble(false);
         setClientRewardBanner(null);
+      }
+    });
+
+    // 🔔 FIGYELMEZTETÉS: Még be kell húzni az X-et a telefonon
+    channel.on("broadcast", { event: "ping_pending_marks" }, () => {
+      if (!isJoinedAsClient) return;
+      if (clientCredits > 0 || clientPenaltyDebt > 0) {
+        setClientRewardBanner("⚠️ Figyelem! Még be kell húznod az X-et a tábládra!");
+        if (typeof window !== "undefined" && "vibrate" in navigator) {
+          try { navigator.vibrate([150, 70, 150, 70, 250]); } catch (_) {}
+        }
+        playMarkerSound(true);
       }
     });
 
@@ -1039,16 +1119,49 @@ export default function Home() {
 
     channel.on("broadcast", { event: "submit_guess" }, ({ payload }) => {
       if (!isJoinedAsClient && payload?.playerName) {
-        setRoundGuesses((prev) => ({
-          ...prev,
-          [payload.playerName]: {
-            playerName: payload.playerName,
-            year: Number(payload.year),
-            text: String(payload.text || "").trim(),
-            riskDouble: Boolean(payload.riskDouble),
-            submittedAt: Date.now(),
-          },
-        }));
+        const now = Date.now();
+        const responseTimeMs = Math.max(500, now - roundStartTimeRef.current);
+
+        setRoundGuesses((prev) => {
+          const isEdit = Boolean(prev[payload.playerName]);
+
+          setSessionStats((st) => {
+            const cur = st[payload.playerName] || {
+              guessesCount: 0,
+              totalYearDiff: 0,
+              maxYearDiff: 0,
+              exactYearCount: 0,
+              buzzerCount: 0,
+              riskCount: 0,
+              riskWonCount: 0,
+              riskLostCount: 0,
+              editCount: 0,
+              totalResponseTimeMs: 0,
+              fastestResponseTimeMs: 999999,
+            };
+
+            return {
+              ...st,
+              [payload.playerName]: {
+                ...cur,
+                editCount: (cur.editCount || 0) + (isEdit ? 1 : 0),
+                totalResponseTimeMs: (cur.totalResponseTimeMs || 0) + responseTimeMs,
+                fastestResponseTimeMs: Math.min(cur.fastestResponseTimeMs ?? 999999, responseTimeMs),
+              },
+            };
+          });
+
+          return {
+            ...prev,
+            [payload.playerName]: {
+              playerName: payload.playerName,
+              year: Number(payload.year),
+              text: String(payload.text || "").trim(),
+              riskDouble: Boolean(payload.riskDouble),
+              submittedAt: now,
+            },
+          };
+        });
       }
     });
 
@@ -1195,11 +1308,26 @@ export default function Home() {
     }
   };
 
-  // ================= 7. CSALÁSVÉDETT MOBIL TÁBLA KATTINTÁS (SZIGORÚ KVÍZ MÓD) =================
+  // ================= 7. CSALÁSVÉDETT MOBIL TÁBLA KATTINTÁS (SZIGORÚ KVÍZ MÓD ÉS PÖRGETETT SZÍN) =================
   const handleClientTileClick = (r: number, c: number) => {
     const isCurrentlyMarked = clientGrid[r][c];
     const willBeMarked = !isCurrentlyMarked;
     const markedCount = clientGrid.flat().filter(Boolean).length;
+
+    const targetColorIdx = getCategoryColorIndex(activeCategory);
+    const tileColorIdx = clientColorGrid?.[r]?.[c] ?? ((r + c) % 5);
+
+    // ⛔ CSALÁSVÉDELEM: Csak a pörgetett kategória színére tehető X!
+    if (willBeMarked && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
+      setClientRewardBanner(`⛔ Csak a pörgetett színre (${activeCategory?.label || "Aktív szín"}) tehetsz X-et!`);
+      if (typeof window !== "undefined" && "vibrate" in navigator) {
+        try { navigator.vibrate([100, 50, 100]); } catch (_) {}
+      }
+      return;
+    }
+
+    let newCredits = clientCredits;
+    let newDebt = clientPenaltyDebt;
 
     if (strictQuizMode) {
       if (willBeMarked) {
@@ -1211,27 +1339,20 @@ export default function Home() {
           alert("🔒 Nincs szabad X lépésed! Találd el a feladványt a következő körben az X feloldásához!");
           return;
         }
-        // 1 kredit levonása
-        setClientCredits((prev) => {
-          const next = Math.max(0, prev - 1);
-          localStorage.setItem("hit_player_credits", String(next));
-          return next;
-        });
+        newCredits = Math.max(0, clientCredits - 1);
+        setClientCredits(newCredits);
+        localStorage.setItem("hit_player_credits", String(newCredits));
       } else {
         // Meglévő X levétele: ha büntetésben volt, letudja a büntetést; különben visszakapja a kreditet, hogy átrakja máshova
         if (clientPenaltyDebt > 0) {
-          setClientPenaltyDebt((prev) => {
-            const next = Math.max(0, prev - 1);
-            localStorage.setItem("hit_player_debt", String(next));
-            return next;
-          });
+          newDebt = Math.max(0, clientPenaltyDebt - 1);
+          setClientPenaltyDebt(newDebt);
+          localStorage.setItem("hit_player_debt", String(newDebt));
           setClientRewardBanner("✅ Büntetés letudva (1 X leradírozva)!");
         } else {
-          setClientCredits((prev) => {
-            const next = prev + 1;
-            localStorage.setItem("hit_player_credits", String(next));
-            return next;
-          });
+          newCredits = clientCredits + 1;
+          setClientCredits(newCredits);
+          localStorage.setItem("hit_player_credits", String(newCredits));
         }
       }
     }
@@ -1255,7 +1376,16 @@ export default function Home() {
       channelRef.current.send({
         type: "broadcast",
         event: "player_sync",
-        payload: { id: playerName, name: playerName, grid: newGrid, colorGrid: clientColorGrid, notes: clientNotes, hasWon },
+        payload: {
+          id: playerName,
+          name: playerName,
+          grid: newGrid,
+          colorGrid: clientColorGrid,
+          notes: clientNotes,
+          hasWon,
+          credits: newCredits,
+          debt: newDebt,
+        },
       });
     }
   };
@@ -1359,6 +1489,7 @@ export default function Home() {
       }, 1000);
     } else if (autoPlayCountdown === 0) {
       setAutoPlayCountdown(null);
+      roundStartTimeRef.current = Date.now();
       if (audioRef.current) {
         const smartStart = smartIntroSkip ? getSmartStartTime(currentTrack?.lyrics) : 0;
         audioRef.current.currentTime = smartStart;
@@ -1449,44 +1580,75 @@ export default function Home() {
         scoredTrackIdRef.current = currentTrack.id;
 
         if (evaluatedGuesses.length > 0) {
+          const awards: Record<string, { deltaCredits: number; penalty: number; reason: string }> = {};
+          evaluatedGuesses.forEach((g) => {
+            if (g.earnedCredits > 0 || g.penalty > 0) {
+              awards[g.playerName] = {
+                deltaCredits: g.earnedCredits,
+                penalty: g.penalty,
+                reason: g.wonDouble ? "Dupla vagy Semmi telitalálat!" : "Helyes tipp!",
+              };
+            }
+          });
+
+          // Frissítjük a session statisztikákat a részletes díjátadóhoz
           setSessionStats((prev) => {
             const next = { ...prev };
             evaluatedGuesses.forEach((g) => {
               const cur = next[g.playerName] || {
                 guessesCount: 0,
                 totalYearDiff: 0,
+                maxYearDiff: 0,
+                exactYearCount: 0,
                 buzzerCount: 0,
                 riskCount: 0,
+                riskWonCount: 0,
+                riskLostCount: 0,
+                editCount: 0,
+                totalResponseTimeMs: 0,
+                fastestResponseTimeMs: 999999,
               };
+
+              const isExact = g.yearDiff === 0;
+              const isNewMax = g.yearDiff > (cur.maxYearDiff || 0);
+
               next[g.playerName] = {
                 ...cur,
                 guessesCount: cur.guessesCount + 1,
                 totalYearDiff: cur.totalYearDiff + g.yearDiff,
+                maxYearDiff: isNewMax ? g.yearDiff : cur.maxYearDiff,
+                maxYearDiffSong: isNewMax
+                  ? `${currentTrack.artist} - ${currentTrack.title} (${currentTrack.year} vs ${g.year})`
+                  : cur.maxYearDiffSong,
+                exactYearCount: (cur.exactYearCount || 0) + (isExact ? 1 : 0),
                 riskCount: cur.riskCount + (g.riskDouble ? 1 : 0),
+                riskWonCount: (cur.riskWonCount || 0) + (g.wonDouble ? 1 : 0),
+                riskLostCount: (cur.riskLostCount || 0) + (g.riskDouble && !g.wonDouble ? 1 : 0),
               };
             });
             return next;
           });
 
+          // Host oldali játékosok kreditjeinek rögzítése a pörgetési zárhoz
+          setPlayers((prev) =>
+            prev.map((p) => {
+              const award = awards[p.name];
+              if (!award) return p;
+              return {
+                ...p,
+                credits: (p.credits ?? 0) + award.deltaCredits,
+                debt: (p.debt ?? 0) + award.penalty,
+              };
+            })
+          );
+
           // Jutalom X kreditek kiküldése a telefonokra
-          if (channelRef.current) {
-            const awards: Record<string, { deltaCredits: number; penalty: number; reason: string }> = {};
-            evaluatedGuesses.forEach((g) => {
-              if (g.earnedCredits > 0 || g.penalty > 0) {
-                awards[g.playerName] = {
-                  deltaCredits: g.earnedCredits,
-                  penalty: g.penalty,
-                  reason: g.wonDouble ? "Dupla vagy Semmi telitalálat!" : "Helyes tipp!",
-                };
-              }
+          if (channelRef.current && Object.keys(awards).length > 0) {
+            channelRef.current.send({
+              type: "broadcast",
+              event: "award_credits",
+              payload: { awards, trackId: currentTrack.id },
             });
-            if (Object.keys(awards).length > 0) {
-              channelRef.current.send({
-                type: "broadcast",
-                event: "award_credits",
-                payload: { awards, trackId: currentTrack.id },
-              });
-            }
           }
         }
       }
@@ -1589,13 +1751,7 @@ export default function Home() {
         handleFlipAndShow();
       },
       next: handleNextTrack,
-      spin: () => {
-        setActiveTab("game");
-        setIsFlipped(false);
-        setTimeout(() => {
-          document.querySelector<HTMLButtonElement>("#roulette-spin-btn")?.click();
-        }, 150);
-      },
+      spin: () => handleAttemptSpin(false),
       switchTab: () => {
         setActiveTab((prev) => (prev === "boards" ? "game" : "boards"));
       },
@@ -1614,6 +1770,7 @@ export default function Home() {
         setIsLayoutMenuOpen(false);
         setIsHostModalOpen(false);
         setIsPodiumOpen(false);
+        setPendingMarksModalOpen(false);
       } else if (e.code === "Space") {
         e.preventDefault();
         if (activeTab === "game") {
@@ -1665,20 +1822,65 @@ export default function Home() {
 
     const champion = rankedPlayers[0];
 
+    // 1. Sniper (Élő Lexikon): legtöbb pontos évszám találat, vagy legkisebb átlag tévedés
     let sniperName = "Még nincs tipp";
     let sniperDetail = "-";
+    let maxExact = -1;
     let bestAvg = Infinity;
     Object.entries(sessionStats).forEach(([name, st]) => {
       if (st.guessesCount > 0) {
+        const exact = st.exactYearCount || 0;
         const avg = st.totalYearDiff / st.guessesCount;
-        if (avg < bestAvg) {
+        if (exact > maxExact || (exact === maxExact && avg < bestAvg)) {
+          maxExact = exact;
           bestAvg = avg;
           sniperName = name;
-          sniperDetail = `Átlag ±${avg.toFixed(1)} év (${st.guessesCount} tipp)`;
+          sniperDetail = `${exact}× pontos telitalálat (Átlag ±${avg.toFixed(1)} év)`;
         }
       }
     });
 
+    // 2. Villámagyú: leggyorsabb átlagos válaszidő
+    let fastestBrainName = "Még nincs tipp";
+    let fastestBrainDetail = "-";
+    let bestResponseTime = Infinity;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if (st.guessesCount > 0 && (st.totalResponseTimeMs || 0) > 0) {
+        const avgSec = st.totalResponseTimeMs / st.guessesCount / 1000;
+        if (avgSec < bestResponseTime) {
+          bestResponseTime = avgSec;
+          fastestBrainName = name;
+          const bestSingle = st.fastestResponseTimeMs < 99999 ? (st.fastestResponseTimeMs / 1000).toFixed(1) : avgSec.toFixed(1);
+          fastestBrainDetail = `Átlag: ${avgSec.toFixed(1)}s (Legjobb: ${bestSingle}s)`;
+        }
+      }
+    });
+
+    // 3. Taktikus / Bizonytalan Zseni: legtöbb tipp-átírás az utolsó pillanatban
+    let tacticianName = "Még senki";
+    let tacticianDetail = "0 módosítás";
+    let maxEdits = 0;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if ((st.editCount || 0) > maxEdits) {
+        maxEdits = st.editCount;
+        tacticianName = name;
+        tacticianDetail = `${st.editCount}× írta át / változtatta a tippjét`;
+      }
+    });
+
+    // 4. Időutazó: legnagyobb évszám mellélövés egyetlen körben
+    let timeTravelerName = "Még senki";
+    let timeTravelerDetail = "-";
+    let maxDiff = 0;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if ((st.maxYearDiff || 0) > maxDiff) {
+        maxDiff = st.maxYearDiff;
+        timeTravelerName = name;
+        timeTravelerDetail = `±${st.maxYearDiff} év mellé! (${st.maxYearDiffSong || "dal"})`;
+      }
+    });
+
+    // 5. Villámkezű Csengettyűs (Buzzer)
     let fastestName = "Még senki";
     let fastestDetail = "0 csengetés";
     let maxBuzz = 0;
@@ -1690,6 +1892,7 @@ export default function Home() {
       }
     });
 
+    // 6. Kaszinók Királya (Dupla vagy Semmi)
     let gamblerName = "Még senki";
     let gamblerDetail = "0 kockáztatás";
     let maxRisk = 0;
@@ -1697,8 +1900,55 @@ export default function Home() {
       if (st.riskCount > maxRisk) {
         maxRisk = st.riskCount;
         gamblerName = name;
-        gamblerDetail = `${st.riskCount}× Dupla vagy Semmi`;
+        gamblerDetail = `${st.riskCount}× Dupla vagy Semmi (${st.riskWonCount || 0} siker)`;
       }
+    });
+
+    // 7. Feltámadó Főnix (Pechbajnok)
+    let phoenixName = "Még senki";
+    let phoenixDetail = "0 bukott büntetés";
+    let maxLost = 0;
+    Object.entries(sessionStats).forEach(([name, st]) => {
+      if ((st.riskLostCount || 0) > maxLost) {
+        maxLost = st.riskLostCount;
+        phoenixName = name;
+        phoenixDetail = `${st.riskLostCount} elbukott büntetés után is talpon`;
+      }
+    });
+
+    // 8. Részletes táblázatos játékos kartoték
+    const detailedPlayerStats = rankedPlayers.map((p) => {
+      const st = sessionStats[p.name] || {
+        guessesCount: 0,
+        totalYearDiff: 0,
+        maxYearDiff: 0,
+        exactYearCount: 0,
+        buzzerCount: 0,
+        riskCount: 0,
+        riskWonCount: 0,
+        riskLostCount: 0,
+        editCount: 0,
+        totalResponseTimeMs: 0,
+        fastestResponseTimeMs: 999999,
+      };
+
+      return {
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        hasWon: p.hasWon,
+        guessesCount: st.guessesCount,
+        avgResponseSec: st.guessesCount > 0 ? (st.totalResponseTimeMs / st.guessesCount / 1000).toFixed(1) : "-",
+        fastestResponseSec: st.fastestResponseTimeMs < 99999 ? (st.fastestResponseTimeMs / 1000).toFixed(1) : "-",
+        avgYearDiff: st.guessesCount > 0 ? (st.totalYearDiff / st.guessesCount).toFixed(1) : "-",
+        exactYears: st.exactYearCount || 0,
+        maxYearDiff: st.maxYearDiff > 0 ? `±${st.maxYearDiff} év` : "-",
+        maxYearDiffSong: st.maxYearDiffSong || "",
+        editCount: st.editCount || 0,
+        buzzerCount: st.buzzerCount || 0,
+        riskWon: st.riskWonCount || 0,
+        riskTotal: st.riskCount || 0,
+      };
     });
 
     return {
@@ -1707,10 +1957,19 @@ export default function Home() {
       championDetail: `${champion?.score || 0}/25 X ${champion?.hasWon ? "(BINGO!)" : ""}`,
       sniperName,
       sniperDetail,
+      fastestBrainName,
+      fastestBrainDetail,
+      tacticianName,
+      tacticianDetail,
+      timeTravelerName,
+      timeTravelerDetail,
       fastestName,
       fastestDetail,
       gamblerName,
       gamblerDetail,
+      phoenixName,
+      phoenixDetail,
+      detailedPlayerStats,
     };
   }, [players, sessionStats]);
 
@@ -2015,16 +2274,36 @@ export default function Home() {
                 </div>
               )}
 
+              {/* 🎯 AKTÍV PÖRGETETT SZÍN JELZŐSÁV MOBILON */}
+              {activeCategory && (
+                <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-neutral-900 border border-neutral-800 text-xs">
+                  <span className="text-neutral-400 font-medium">Pörgetett szín:</span>
+                  <span className="font-black uppercase flex items-center gap-1.5" style={{ color: activeCategory.accent }}>
+                    <span className="w-2.5 h-2.5 rounded-full inline-block shadow-sm" style={{ backgroundColor: activeCategory.accent }} />
+                    {activeCategory.label}
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2 rounded-2xl border border-neutral-800">
                 {clientGrid.map((row, r) =>
                   row.map((isMarked, c) => {
                     const tileColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
                     const colorIdx = clientColorGrid?.[r]?.[c] ?? ((r + c) % tileColors.length);
+                    const targetColorIdx = getCategoryColorIndex(activeCategory);
+                    const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx;
+                    const isHighlight = !isMarked && targetColorIdx !== -1 && isTargetColor;
+                    const isDimmed = !isMarked && targetColorIdx !== -1 && !isTargetColor;
+
                     return (
                       <button
                         key={`${r}-${c}`}
                         onClick={() => handleClientTileClick(r, c)}
-                        className="aspect-square rounded-xl flex items-center justify-center relative shadow select-none active:scale-90 transition overflow-hidden"
+                        className={`aspect-square rounded-xl flex items-center justify-center relative shadow select-none active:scale-90 transition overflow-hidden ${
+                          isHighlight ? "ring-2 ring-white shadow-[0_0_12px_rgba(255,255,255,0.7)] animate-pulse scale-102" : ""
+                        } ${
+                          isDimmed ? "opacity-35 cursor-not-allowed" : ""
+                        }`}
                         style={{ backgroundColor: tileColors[colorIdx] }}
                       >
                         {isMarked && (
@@ -2686,7 +2965,7 @@ export default function Home() {
                 setPlayers={setPlayers}
                 activePlayerIdx={activePlayerIdx}
                 setActivePlayerIdx={setActivePlayerIdx}
-                onStartSpinAndMusic={() => remoteHandlersRef.current.spin()}
+                onStartSpinAndMusic={() => handleAttemptSpin(false)}
                 isPlayingMusic={isPlaying}
                 activeCategory={activeCategory}
                 tvMode={isTvMode}
@@ -2753,10 +3032,23 @@ export default function Home() {
 
                     <RouletteWheel
                       onSpinEnd={handleSpinEnd}
+                      onBeforeSpin={() => handleAttemptSpin(false)}
                       tvMode={isTvMode}
                       tvScale={tvScale}
                       customWheelSize={isTvMode ? tvWheelSize : undefined}
                     />
+
+                    {/* FIGYELMEZTETŐ GOMB HA VALAKI NEM HÚZTA BE AZ X-ET */}
+                    {pendingPlayers.length > 0 && (
+                      <button
+                        onClick={() => setPendingMarksModalOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 text-xs font-bold animate-pulse hover:bg-rose-500/30 transition shadow-lg mt-3"
+                        title="Kattints a részletekhez"
+                      >
+                        <Bell className="w-3.5 h-3.5" />
+                        <span>X behúzása hiányzik ({pendingPlayers.length} játékos)</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* KÖZTES INTERAKTÍV HÚZHATÓ ELVÁLASZTÓ (DRAGGABLE RESIZER & GAP ADJUSTER) */}
@@ -2932,131 +3224,420 @@ export default function Home() {
             </footer>
           </div>
 
-          {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & DÍJÁTADÓ MODAL */}
-          {isPodiumOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg overflow-y-auto">
+          {/* 🏆 PARTI ZÁRÓKÉPERNYŐ & DÍJÁTADÓ MODAL (PORTAL TO BODY) */}
+          {mounted && isPodiumOpen && createPortal(
+            <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-xl overflow-y-auto animate-in fade-in duration-200">
               <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
+                initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="w-full max-w-3xl bg-neutral-900 border-2 border-amber-400/80 rounded-[36px] p-6 sm:p-8 shadow-[0_0_80px_rgba(245,158,11,0.3)] flex flex-col items-center gap-6 text-center my-auto"
+                className="w-full max-w-5xl bg-neutral-900 border-2 border-amber-400/80 rounded-[32px] sm:rounded-[36px] p-5 sm:p-7 shadow-[0_0_80px_rgba(245,158,11,0.35)] flex flex-col gap-5 text-center my-auto max-h-[92vh] overflow-y-auto"
               >
+                {/* FEJLÉC */}
                 <div className="w-full flex justify-between items-center border-b border-neutral-800 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <Trophy className="w-7 h-7 text-amber-400" />
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
+                      <Trophy className="w-7 h-7" />
+                    </div>
                     <div className="text-left">
                       <h2 className="text-lg sm:text-2xl font-black uppercase tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-300 to-white">
-                        Hit-Roulette Díjátadó & Dobogó
+                        Hit-Roulette Hivatalos Díjátadó
                       </h2>
-                      <p className="text-xs text-neutral-400">Az este hivatalos végeredménye és különdíjai</p>
+                      <p className="text-xs text-neutral-400">Az este karakteres különdíjai, rekordjai és részletes kartotékai</p>
                     </div>
                   </div>
                   <button
                     onClick={() => setIsPodiumOpen(false)}
                     className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
+                    title="Bezárás"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <div className="w-full grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-2">
-                  {podiumData.top3.map((p, idx) => {
-                    const medals = ["🥇 1. HELY", "🥈 2. HELY", "🥉 3. HELY"];
-                    const styles = [
-                      "bg-gradient-to-b from-amber-500/25 to-neutral-950 border-amber-400 sm:h-44",
-                      "bg-gradient-to-b from-slate-400/20 to-neutral-950 border-slate-400 sm:h-36",
-                      "bg-gradient-to-b from-orange-700/20 to-neutral-950 border-orange-500 sm:h-32",
-                    ];
+                {/* FÜL VÁLTÓ GOMBOK (TABS) */}
+                <div className="flex items-center justify-center gap-2 p-1 bg-neutral-950 border border-neutral-800 rounded-2xl max-w-md mx-auto w-full">
+                  <button
+                    onClick={() => setPodiumTab("awards")}
+                    className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-1.5 ${
+                      podiumTab === "awards"
+                        ? "bg-amber-500 text-neutral-950 shadow-md font-black"
+                        : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    <span>🎖️ Különdíjak & Karakterek</span>
+                  </button>
+                  <button
+                    onClick={() => setPodiumTab("stats")}
+                    className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-1.5 ${
+                      podiumTab === "stats"
+                        ? "bg-amber-500 text-neutral-950 shadow-md font-black"
+                        : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    <span>📊 Részletes Kartoték</span>
+                  </button>
+                </div>
+
+                {/* 1. FÜL: KÜLÖNDÍJAK & KARAKTEREK */}
+                {podiumTab === "awards" && (
+                  <div className="flex flex-col gap-5 w-full">
+                    {/* DOBOGÓ TOP 3 */}
+                    <div className="w-full grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-1">
+                      {podiumData.top3.map((p, idx) => {
+                        const medals = ["🥇 1. HELY (BAJNOK)", "🥈 2. HELY", "🥉 3. HELY"];
+                        const styles = [
+                          "bg-gradient-to-b from-amber-500/25 to-neutral-950 border-amber-400 sm:h-44 shadow-[0_0_30px_rgba(245,158,11,0.2)]",
+                          "bg-gradient-to-b from-slate-400/20 to-neutral-950 border-slate-400 sm:h-36",
+                          "bg-gradient-to-b from-orange-700/20 to-neutral-950 border-orange-500 sm:h-32",
+                        ];
+                        return (
+                          <div
+                            key={p.id}
+                            className={`rounded-3xl border-2 p-4 flex flex-col items-center justify-center gap-1.5 shadow-xl transition hover:scale-102 ${styles[idx]}`}
+                          >
+                            <span className="text-xs font-black uppercase tracking-widest text-amber-300">
+                              {medals[idx]}
+                            </span>
+                            <span className="text-lg sm:text-xl font-black text-white uppercase truncate max-w-full">
+                              {p.name}
+                            </span>
+                            <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200">
+                              {p.score} / 25 X {p.hasWon ? "🏆 BINGO" : ""}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 8 KARAKTERES KÜLÖNDÍJ GRID */}
+                    <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-left">
+                      {/* 1. Bajnok */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-amber-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-2xl shrink-0">
+                          👑
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block truncate">
+                            Az Este Bajnoka
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.championName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.championDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 2. Sniper */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-emerald-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-2xl shrink-0">
+                          🎯
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block truncate">
+                            A Mesterlövész (Sniper)
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.sniperName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.sniperDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 3. Villámagyú */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-cyan-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-2xl shrink-0">
+                          ⚡
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400 block truncate">
+                            A Villámagyú (Válaszidő)
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.fastestBrainName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.fastestBrainDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 4. Taktikus */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-blue-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-2xl shrink-0">
+                          🤔
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-blue-400 block truncate">
+                            A Taktikus (Átírogató)
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.tacticianName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.tacticianDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 5. Időutazó */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-fuchsia-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-fuchsia-500/15 border border-fuchsia-500/30 flex items-center justify-center text-2xl shrink-0">
+                          ⏳
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-fuchsia-400 block truncate">
+                            Az Időutazó (Mellélövés)
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.timeTravelerName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.timeTravelerDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 6. Buzzer */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-rose-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-2xl shrink-0">
+                          🔔
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-rose-400 block truncate">
+                            A Villámcsengő (Buzzer)
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.fastestName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.fastestDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 7. Kockáztató */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-purple-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-2xl shrink-0">
+                          🎲
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-purple-400 block truncate">
+                            Kaszinók Királya (Dupla)
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.gamblerName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.gamblerDetail}</p>
+                        </div>
+                      </div>
+
+                      {/* 8. Főnix */}
+                      <div className="p-3.5 rounded-2xl bg-neutral-950/80 border border-orange-500/40 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-2xl shrink-0">
+                          💀
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-orange-400 block truncate">
+                            A Feltámadó Főnix
+                          </span>
+                          <h4 className="text-sm font-black text-white uppercase truncate">{podiumData.phoenixName}</h4>
+                          <p className="text-[11px] text-neutral-400 font-mono truncate">{podiumData.phoenixDetail}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. FÜL: RÉSZLETES JÁTÉKOS KARTOTÉK TÁBLÁZAT */}
+                {podiumTab === "stats" && (
+                  <div className="w-full overflow-x-auto rounded-2xl border border-neutral-800 bg-neutral-950 p-2 shadow-inner">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-neutral-800 text-neutral-400 font-bold uppercase tracking-wider text-[10px]">
+                          <th className="p-2.5">Helyezés & Játékos</th>
+                          <th className="p-2.5 text-center">X / 25</th>
+                          <th className="p-2.5 text-center">Tippek</th>
+                          <th className="p-2.5 text-center">Átl. Idő</th>
+                          <th className="p-2.5 text-center">Leggyorsabb</th>
+                          <th className="p-2.5 text-center">🎯 Pontos</th>
+                          <th className="p-2.5 text-center">Átl. Eltérés</th>
+                          <th className="p-2.5 text-center">Legnagyobb Mellé</th>
+                          <th className="p-2.5 text-center">🤔 Átírások</th>
+                          <th className="p-2.5 text-center">🔔 Buzzer</th>
+                          <th className="p-2.5 text-center">🎲 Dupla</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-900 font-medium">
+                        {podiumData.detailedPlayerStats.map((st, idx) => (
+                          <tr key={st.id} className="hover:bg-neutral-900/60 transition">
+                            <td className="p-2.5 flex items-center gap-2 font-bold text-white">
+                              <span
+                                className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
+                                  idx === 0
+                                    ? "bg-amber-400 text-black"
+                                    : idx === 1
+                                    ? "bg-slate-300 text-black"
+                                    : idx === 2
+                                    ? "bg-orange-400 text-black"
+                                    : "bg-neutral-800 text-neutral-400"
+                                }`}
+                              >
+                                {idx + 1}
+                              </span>
+                              <span className="truncate max-w-[120px]">{st.name}</span>
+                              {st.hasWon && <span className="text-[10px] text-amber-400">🏆</span>}
+                            </td>
+                            <td className="p-2.5 text-center font-bold font-mono text-amber-400">{st.score}</td>
+                            <td className="p-2.5 text-center text-neutral-400">{st.guessesCount}</td>
+                            <td className="p-2.5 text-center font-mono text-cyan-300">
+                              {st.avgResponseSec !== "-" ? `${st.avgResponseSec}s` : "-"}
+                            </td>
+                            <td className="p-2.5 text-center font-mono text-cyan-400 font-bold">
+                              {st.fastestResponseSec !== "-" ? `${st.fastestResponseSec}s` : "-"}
+                            </td>
+                            <td className="p-2.5 text-center font-bold text-emerald-400 font-mono">{st.exactYears}×</td>
+                            <td className="p-2.5 text-center font-mono text-neutral-300">
+                              {st.avgYearDiff !== "-" ? `±${st.avgYearDiff} év` : "-"}
+                            </td>
+                            <td
+                              className="p-2.5 text-center text-[11px] font-mono text-fuchsia-300 truncate max-w-[140px]"
+                              title={st.maxYearDiffSong ? `${st.maxYearDiff} (${st.maxYearDiffSong})` : st.maxYearDiff}
+                            >
+                              {st.maxYearDiff}
+                            </td>
+                            <td className="p-2.5 text-center font-mono text-blue-300">{st.editCount}×</td>
+                            <td className="p-2.5 text-center font-mono text-rose-300">{st.buzzerCount}×</td>
+                            <td className="p-2.5 text-center font-mono text-purple-300">
+                              {st.riskTotal > 0 ? `${st.riskWon}/${st.riskTotal}` : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* MODAL LÁBLÉC: HANGOK & BEZÁRÁS */}
+                <div className="w-full flex flex-wrap justify-between items-center gap-2 pt-2 border-t border-neutral-800">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => playPartySoundEffect("airhorn")}
+                      className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition"
+                    >
+                      <Volume2 className="w-4 h-4" />
+                      <span>🎺 Duda</span>
+                    </button>
+                    <button
+                      onClick={() => playPartySoundEffect("drumroll")}
+                      className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition"
+                    >
+                      <span>🥁 Dobpergés</span>
+                    </button>
+                    <button
+                      onClick={() => playPartySoundEffect("fanfare")}
+                      className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition"
+                    >
+                      <span>🎉 Fanfár</span>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setIsPodiumOpen(false)}
+                    className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs uppercase tracking-wider transition shadow-lg shadow-amber-500/20"
+                  >
+                    Vissza a Játékhoz / Bezárás
+                  </button>
+                </div>
+              </motion.div>
+            </div>,
+            document.body
+          )}
+
+          {/* ⚠️ FÜGGŐBEN LÉVŐ X BEHÚZÁSOK & CSALÁSVÉDELEM MODAL (PORTAL TO BODY) */}
+          {mounted && pendingMarksModalOpen && createPortal(
+            <div
+              className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setPendingMarksModalOpen(false);
+              }}
+            >
+              <div
+                className="w-full max-w-lg bg-neutral-900 border-2 border-rose-500/80 rounded-3xl p-6 shadow-[0_20px_70px_rgba(244,63,94,0.3)] flex flex-col gap-5 text-neutral-200 relative animate-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* FEJLÉC */}
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-400">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className="font-black uppercase tracking-wider text-white text-base">
+                        Várakozás X Behúzásra ({pendingPlayers.length} játékos)
+                      </h3>
+                      <p className="text-[11px] text-neutral-400">
+                        A következő pörgetés előtt a játékosoknak be kell jelölniük a pontjukat!
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPendingMarksModalOpen(false)}
+                    className="p-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* PENDING JÁTÉKOSOK LISTÁJA */}
+                <div className="flex flex-col gap-2 max-h-60 overflow-y-auto">
+                  {pendingPlayers.map((p) => {
+                    const cr = p.credits ?? 0;
+                    const db = p.debt ?? 0;
                     return (
                       <div
                         key={p.id}
-                        className={`rounded-3xl border-2 p-4 flex flex-col items-center justify-center gap-1.5 shadow-xl ${styles[idx]}`}
+                        className="flex items-center justify-between p-3 rounded-2xl bg-neutral-950 border border-neutral-800"
                       >
-                        <span className="text-xs font-black uppercase tracking-widest text-amber-300">
-                          {medals[idx]}
-                        </span>
-                        <span className="text-lg font-black text-white uppercase truncate max-w-full">
-                          {p.name}
-                        </span>
-                        <span className="text-xs font-mono font-bold px-3 py-0.5 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-200">
-                          {p.score} / 25 X {p.hasWon ? "🏆 BINGO" : ""}
-                        </span>
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-8 h-8 rounded-xl bg-neutral-900 border border-neutral-700 flex items-center justify-center font-black text-amber-400 text-sm">
+                            📱
+                          </span>
+                          <span className="font-bold text-white text-sm">{p.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {cr > 0 && (
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-bold text-xs flex items-center gap-1">
+                              <span>+{cr} X</span>
+                              <span className="text-[10px] text-emerald-400 font-medium">behúzás vár</span>
+                            </span>
+                          )}
+                          {db > 0 && (
+                            <span className="px-2.5 py-1 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 font-bold text-xs flex items-center gap-1">
+                              <span>-{db} X</span>
+                              <span className="text-[10px] text-rose-400 font-medium">levonás vár</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
 
-                <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-                  <div className="p-4 rounded-2xl bg-neutral-950 border border-amber-500/40 flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-2xl shrink-0">
-                      👑
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">
-                        Az Este Bajnoka
-                      </span>
-                      <h4 className="text-base font-black text-white uppercase">{podiumData.championName}</h4>
-                      <p className="text-xs text-neutral-400 font-mono">{podiumData.championDetail}</p>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-neutral-950 border border-emerald-500/40 flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-2xl shrink-0">
-                      🎯
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
-                        Az Élő Lexikon (Sniper)
-                      </span>
-                      <h4 className="text-base font-black text-white uppercase">{podiumData.sniperName}</h4>
-                      <p className="text-xs text-neutral-400 font-mono">{podiumData.sniperDetail}</p>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-neutral-950 border border-rose-500/40 flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-2xl shrink-0">
-                      ⚡
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">
-                        A Leggyorsabb Kezű (Buzzer)
-                      </span>
-                      <h4 className="text-base font-black text-white uppercase">{podiumData.fastestName}</h4>
-                      <p className="text-xs text-neutral-400 font-mono">{podiumData.fastestDetail}</p>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-neutral-950 border border-purple-500/40 flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-2xl shrink-0">
-                      🎲
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">
-                        A Legnagyobb Szerencsejátékos
-                      </span>
-                      <h4 className="text-base font-black text-white uppercase">{podiumData.gamblerName}</h4>
-                      <p className="text-xs text-neutral-400 font-mono">{podiumData.gamblerDetail}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="w-full flex justify-between items-center pt-2">
+                {/* AKCIÓK */}
+                <div className="flex flex-col gap-2 pt-1">
                   <button
-                    onClick={() => playPartySoundEffect("airhorn")}
-                    className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition"
+                    onClick={() => {
+                      handlePingPendingPlayers();
+                      playMarkerSound(true);
+                    }}
+                    className="w-full py-3 px-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-amber-500/20"
                   >
-                    <Volume2 className="w-4 h-4" />
-                    <span>🎺 Győzelmi Duda</span>
+                    <Bell className="w-4 h-4" />
+                    <span>Értesítés & Rezgés küldése a mobilokra</span>
                   </button>
 
-                  <button
-                    onClick={() => setIsPodiumOpen(false)}
-                    className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs uppercase tracking-wider transition shadow-lg"
-                  >
-                    Folytatás / Bezárás
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        setPendingMarksModalOpen(false);
+                        handleAttemptSpin(true);
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition border border-neutral-700"
+                      title="Átugorja a várakozást és elindítja a kereket"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Pörgetés mindenképp</span>
+                    </button>
+
+                    <button
+                      onClick={() => setPendingMarksModalOpen(false)}
+                      className="py-2.5 px-3 rounded-xl bg-neutral-950 hover:bg-neutral-800 text-neutral-400 hover:text-white font-bold text-xs transition border border-neutral-800"
+                    >
+                      Mégse / Vissza
+                    </button>
+                  </div>
                 </div>
-              </motion.div>
-            </div>
+              </div>
+            </div>,
+            document.body
           )}
 
           {/* TV QR KÓD MODAL + ÚJ PARTI RESET GOMBBAL */}

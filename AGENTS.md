@@ -126,6 +126,7 @@ Host and players communicate on channel `room_${roomCode}` using broadcast event
 | `award_credits` | Host ➔ Client | `{ awards: { [playerName]: { deltaCredits, penalty, reason } } }` | Transmits earned X marks or penalty deductions |
 | `remote_control` | Client ➔ Host | `{ command: "toggle_play" \| "flip" \| "next" \| "spin" \| "switch_tab" \| "open_podium" }` | Host phone controls TV display |
 | `party_reaction` | Client ➔ Host | `{ playerName, emoji?, sound? }` | Floating emoji cannon & party sound effect triggers |
+| `ping_pending_marks` | Host ➔ Client | `{ timestamp }` | Pings mobile clients who haven't placed their earned X marks or resolved penalty debt |
 
 ---
 
@@ -155,6 +156,23 @@ Host and players communicate on channel `room_${roomCode}` using broadcast event
 - **Kerék Stúdió PRO TV**: Modal expands up to 1550px width (`w-[95vw]`), featuring a 420px live preview wheel, maximize toggle, and high-legibility inputs.
 - `tvScale`: UI zoom scaler (90% to 160%, presets: 100%, 115%, 125%, 140%, 155%), persisted in `localStorage`.
 - Keyboard shortcuts: `Space` (flip/play), `P` (play/pause), `ArrowRight` (next), `R` (spin), `F` (fullscreen), `T` (toggle 16:9 TV mode).
+
+### 6. Pörgetett Színre Kötött X Behúzás & Pörgetési Zár (Csalásvédelem)
+- **Kötött Színválasztás**: A játékosok kizárólag a rulettkeréken kipörgetett kategória színének megfelelő mezőkre tehetnek X-et (`getCategoryColorIndex(activeCategory)`). A többi szín halványított (`opacity-35 cursor-not-allowed`), a cél szín pulzáló fehér fénnyel villog.
+- **Pörgetési Zár**: Ha bármelyik játékosnál függőben lévő jóváírás (`credits > 0`) vagy büntetés (`debt > 0`) van, a szerencsekerék NEM pörgethető újra sem billentyűparanccsal (`R`), sem távirányítóval, sem kattintással.
+- **Figyelmeztető Ablak & Mobil Rezgés**: A Házigazda képernyőjén megjelenik a lemaradó játékosok listája, ahonnan azonnali rezgéses és hangos figyelmeztetés küldhető a telefonokra (`ping_pending_marks`), vagy Házigazda felülbírálással a pörgetés elindítható.
+
+### 7. Részletes Díjátadó & Karakter Különdíjak (Podium Analytics)
+- **8 Különleges Karakterdíj**:
+  - 👑 **Az Este Bajnoka**: Legtöbb elhelyezett X és Bingó győztes.
+  - 🎯 **A Mesterlövész (Sniper)**: Legtöbb hajszálpontos évszámtalálat.
+  - ⚡ **A Villámagyú**: Leggyorsabb és legjobb átlagos reakcióidő (másodpercben).
+  - 🤔 **A Taktikus (Bizonytalan Zseni)**: Legtöbb tipp-átírás és módosítás a körök alatt.
+  - ⏳ **Az Időutazó**: Legnagyobb mellélövés évszámban, dalcímmel társítva.
+  - 🔔 **A Villámcsengő**: Legtöbb sikeres buzzer lenyomás.
+  - 🎲 **A Kaszinók Királya**: Dupla vagy Semmi kockáztatások száma és sikeressége.
+  - 💀 **A Feltámadó Főnix**: Legtöbb elbukott büntetés után is küzdő játékos.
+- **Részletes Kartoték**: Teljes interaktív összehasonlító táblázat minden játékos statisztikájával (átlagos/leggyorsabb válaszidő, hibaszázalék, átírások, kockáztatások).
 
 ---
 
