@@ -395,6 +395,7 @@ export default function Home() {
   const [tvWheelSize, setTvWheelSize] = useState<number>(530);
   const [tvCardWidth, setTvCardWidth] = useState<number>(470);
   const [tvGap, setTvGap] = useState<number>(28);
+  const [tvHeaderScale, setTvHeaderScale] = useState<number>(100);
   const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState<boolean>(false);
   const [isDraggingGap, setIsDraggingGap] = useState<boolean>(false);
   const [isDraggingWheel, setIsDraggingWheel] = useState<boolean>(false);
@@ -428,33 +429,36 @@ export default function Home() {
     }
   };
 
-  const saveTvLayout = (wheel: number, card: number, gap: number) => {
+  const saveTvLayout = (wheel: number, card: number, gap: number, headerScale?: number) => {
     const safeWheel = Math.max(380, Math.min(650, wheel));
     const safeCard = Math.max(360, Math.min(580, card));
     const safeGap = Math.max(8, Math.min(160, gap));
+    const safeHeader = headerScale !== undefined ? Math.max(85, Math.min(150, headerScale)) : tvHeaderScale;
     setTvWheelSize(safeWheel);
     setTvCardWidth(safeCard);
     setTvGap(safeGap);
+    if (headerScale !== undefined) setTvHeaderScale(safeHeader);
     if (typeof window !== "undefined") {
       try {
         localStorage.setItem(
           "hit_tv_layout_prefs",
-          JSON.stringify({ wheelSize: safeWheel, cardWidth: safeCard, gap: safeGap })
+          JSON.stringify({ wheelSize: safeWheel, cardWidth: safeCard, gap: safeGap, headerScale: safeHeader })
         );
+        localStorage.setItem("hit_tv_header_scale", String(safeHeader));
       } catch (_) {}
     }
   };
 
   const applyLayoutPreset = (type: "cinema" | "balanced" | "compact") => {
     if (type === "cinema") {
-      // 🎬 TV Mozi: Óriás elemek, feszes 24px hézag, teljes képernyőkitöltés
-      saveTvLayout(580, 510, 24);
+      // 🎬 TV Mozi: Óriás elemek, feszes 24px hézag, nagy fejléc TV-re
+      saveTvLayout(580, 510, 24, 125);
     } else if (type === "balanced") {
       // 🎯 Kiegyensúlyozott
-      saveTvLayout(520, 460, 36);
+      saveTvLayout(520, 460, 36, 110);
     } else if (type === "compact") {
       // ⚡ Kompakt
-      saveTvLayout(450, 410, 20);
+      saveTvLayout(450, 410, 20, 100);
     }
   };
 
@@ -862,7 +866,13 @@ export default function Home() {
         if (parsed.wheelSize) setTvWheelSize(parsed.wheelSize);
         if (parsed.cardWidth) setTvCardWidth(parsed.cardWidth);
         if (parsed.gap !== undefined) setTvGap(parsed.gap);
+        if (parsed.headerScale !== undefined) setTvHeaderScale(parsed.headerScale);
       } catch (_) {}
+    }
+    const hostHeaderScale = localStorage.getItem("hit_tv_header_scale");
+    if (hostHeaderScale) {
+      const parsedH = parseInt(hostHeaderScale, 10);
+      if (parsedH >= 80 && parsedH <= 160) setTvHeaderScale(parsedH);
     }
 
     if (hostRoom) setRoomCode(hostRoom);
@@ -915,9 +925,10 @@ export default function Home() {
     localStorage.setItem("hit_host_tv_scale", String(tvScale));
     localStorage.setItem(
       "hit_tv_layout_prefs",
-      JSON.stringify({ wheelSize: tvWheelSize, cardWidth: tvCardWidth, gap: tvGap })
+      JSON.stringify({ wheelSize: tvWheelSize, cardWidth: tvCardWidth, gap: tvGap, headerScale: tvHeaderScale })
     );
-  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isTvMode, tvScale, tvWheelSize, tvCardWidth, tvGap, isJoinedAsClient]);
+    localStorage.setItem("hit_tv_header_scale", String(tvHeaderScale));
+  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isTvMode, tvScale, tvWheelSize, tvCardWidth, tvGap, tvHeaderScale, isJoinedAsClient]);
 
   // ================= FADE IN & FADE OUT MOTOR =================
   const stopFadeTimer = () => {
@@ -1141,7 +1152,7 @@ export default function Home() {
       const deltaJoker = myAward.deltaJokerCredits ?? 0;
       const earnedUnits = myAward.earnedPartialUnits ?? 0;
 
-      if (deltaCr > 0 || deltaJoker > 0 || earnedUnits > 0) {
+      if (deltaCr > 0 || deltaJoker !== 0 || earnedUnits > 0) {
         let bannerText = "";
         if (deltaCr > 0) {
           setClientCredits((prev) => {
@@ -1152,13 +1163,17 @@ export default function Home() {
           bannerText += `🎉 +${deltaCr} X a feladvány színére! `;
         }
 
-        if (deltaJoker > 0) {
+        if (deltaJoker !== 0) {
           setClientJokerCredits((prev) => {
-            const next = prev + deltaJoker;
+            const next = Math.max(0, prev + deltaJoker);
             localStorage.setItem("hit_client_joker_credits", String(next));
             return next;
           });
-          bannerText += `⭐ +${deltaJoker} JOKER X (bármely színre)! `;
+          if (deltaJoker > 0) {
+            bannerText += `⭐ +${deltaJoker} JOKER X (bármely színre)! `;
+          } else {
+            bannerText += `ℹ️ Joker X módosítva (${deltaJoker} db)! `;
+          }
         }
 
         if (typeof myAward.totalPartialPoints === "number") {
@@ -1363,6 +1378,23 @@ export default function Home() {
         payload: {
           awards: {
             [targetPlayerName]: { deltaCredits: 0, deltaJokerCredits: 1, penalty: 0, reason: "Házigazda Joker X (+1 Joker X)" },
+          },
+        },
+      });
+    }
+  };
+
+  const revokeManualJokerCreditFromPlayer = (targetPlayerName: string) => {
+    setPlayers((prev) =>
+      prev.map((p) => (p.name === targetPlayerName ? { ...p, jokerCredits: Math.max(0, (p.jokerCredits ?? 0) - 1) } : p))
+    );
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "award_credits",
+        payload: {
+          awards: {
+            [targetPlayerName]: { deltaCredits: 0, deltaJokerCredits: -1, penalty: 0, reason: "Házigazda Joker X korrekció (-1)" },
           },
         },
       });
@@ -2693,9 +2725,12 @@ export default function Home() {
           </div>
 
           {/* FEJLÉC */}
-          <header className={`w-full flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10 ${
-            isTvMode ? "max-w-[1900px]" : "max-w-6xl"
-          }`}>
+          <header
+            style={tvHeaderScale !== 100 ? { zoom: `${tvHeaderScale}%` } : undefined}
+            className={`w-full flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10 transition-all ${
+              isTvMode ? "max-w-[1900px]" : "max-w-6xl"
+            }`}
+          >
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
@@ -3213,7 +3248,7 @@ export default function Home() {
                             : "bg-neutral-950/90 border-neutral-800 text-neutral-400"
                         }`}
                       >
-                        {/* FELSŐ SÁV: JÁTÉKOS NEVE ÉS NAGYPONT STÁTUSZ */}
+                        {/* FELSŐ SÁV: JÁTÉKOS NEVE ÉS NAGYPONT EREDMÉNYE */}
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-lg">
@@ -3226,18 +3261,20 @@ export default function Home() {
                                 </span>
                                 {g.riskDouble ? (
                                   <span
-                                    className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
-                                      g.wonDouble ? "bg-amber-400 text-neutral-950" : "bg-rose-600 text-white"
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                                      g.wonDouble
+                                        ? "bg-gradient-to-r from-amber-400 to-yellow-400 text-neutral-950 shadow"
+                                        : "bg-rose-600 text-white shadow"
                                     }`}
                                   >
-                                    {g.wonDouble ? "🎰 DUPLA NAGYPONT (+2 X)" : "💀 BUKTA (-1 X)"}
+                                    {g.wonDouble ? "🎰 2× DUPLA SIKER!" : "💀 -1 X DUPLA BUKTA"}
                                   </span>
                                 ) : g.earnedCredits > 0 ? (
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-neutral-950 text-[9px] font-black shadow-sm">
-                                    +{g.earnedCredits} X NAGYPONT ({activeCategory?.label || "Kötött szín"})
+                                  <span className="px-2 py-0.5 rounded-lg bg-emerald-500 text-neutral-950 text-[10px] font-black shadow-sm">
+                                    ✅ 1× X ({activeCategory?.label || "Kötött szín"})
                                   </span>
                                 ) : (
-                                  <span className="px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 text-[9px] font-bold">
+                                  <span className="px-2 py-0.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-500 text-[9px] font-bold">
                                     Nincs nagypont
                                   </span>
                                 )}
@@ -3259,60 +3296,103 @@ export default function Home() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          {/* JOBB OLDAL: ÉVSZÁM ÉS EREDMÉNY JELVÉNY */}
+                          <div className="flex items-center gap-2 shrink-0">
                             <div className="text-right font-mono">
                               <div className="text-sm font-black">{g.year}</div>
-                              <div className="text-[10px] font-bold">
-                                {isExact ? "TELITALÁLAT!" : `±${g.yearDiff} év`}
+                              <div className={`text-[10px] font-bold ${isExact ? "text-amber-400" : "text-neutral-400"}`}>
+                                {isExact ? "🎯 PONTOS ÉV!" : `±${g.yearDiff} év`}
                               </div>
                             </div>
-                            {strictQuizMode && (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => grantManualCreditToPlayer(g.playerName)}
-                                  className="px-1.5 py-1 rounded-lg bg-neutral-800 hover:bg-emerald-500 hover:text-neutral-950 text-emerald-400 transition text-[10px] font-black"
-                                  title="Plusz 1 X lépés (pörgetett szín) küldése"
-                                >
-                                  +1 X
-                                </button>
-                                <button
-                                  onClick={() => grantManualJokerCreditToPlayer(g.playerName)}
-                                  className="px-1.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-400 hover:text-neutral-950 text-amber-300 border border-amber-400/50 transition text-[10px] font-black flex items-center gap-0.5"
-                                  title="Kézi Joker X adása (bármely színre tehető)"
-                                >
-                                  <Sparkles className="w-2.5 h-2.5" />
-                                  <span>+⭐</span>
-                                </button>
+
+                            {/* PONTJELVÉNY - CSAK HA NYERT VAGY BUKOTT, KÜLÖNBEN NEM ZAVARUNK ITT SENKIT! */}
+                            {g.riskDouble ? (
+                              g.wonDouble ? (
+                                <div className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 text-neutral-950 font-black text-xs shadow-md">
+                                  +2 X
+                                </div>
+                              ) : (
+                                <div className="px-2.5 py-1 rounded-xl bg-rose-600 text-white font-black text-xs shadow-md">
+                                  -1 X
+                                </div>
+                              )
+                            ) : g.earnedCredits > 0 ? (
+                              <div className="px-2.5 py-1 rounded-xl bg-emerald-500 text-neutral-950 font-black text-xs shadow-md">
+                                +1 X
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
 
-                        {/* ⭐ KÜLÖNÁLLÓ RÉSZPONT SZEKCIÓ (TÖLTI A JOKER X-ET) */}
+                        {/* ⭐ RÉSZPONT SZEKCIÓ (TÖLTI A JOKER X-ET) ÉS RÉSZLETES MAGYARÁZAT */}
                         {fractionalPointsRate !== "off" && (
-                          <div className="mt-2 pt-2 border-t border-neutral-800/80 flex items-center justify-between gap-2 bg-black/40 -mx-1 -mb-1 p-2 rounded-xl">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-black uppercase text-amber-300 flex items-center gap-1">
-                                <Sparkles className="w-3 h-3 text-amber-400" />
-                                <span>Részpont ({fractionalPointsRate}):</span>
-                              </span>
-                              {hasSecondary ? (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 text-[10px] font-bold border border-amber-400/40">
-                                  +{g.earnedPartialUnits}× ({g.secondaryReasons.join(" • ")})
+                          <div className="mt-2.5 p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-neutral-950 border border-amber-500/30 flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-black uppercase text-amber-300 flex items-center gap-1">
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Részpont ({fractionalPointsRate}):</span>
                                 </span>
-                              ) : (
-                                <span className="text-[10px] text-neutral-500 italic">Nincs másodlagos találat</span>
-                              )}
+                                {hasSecondary ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-200 text-[10px] font-bold border border-amber-400/40">
+                                    +{g.earnedPartialUnits}× ({g.secondaryReasons.join(" • ")})
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-neutral-500 italic">Nincs másodlagos találat</span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 bg-neutral-900/90 px-2 py-0.5 rounded-lg border border-neutral-800">
+                                  <span>Haladás:</span>
+                                  <span className="text-white font-black">{playerObj?.partialPoints ?? 0}/{threshold}</span>
+                                  <span>⭐</span>
+                                </div>
+                                {(playerObj?.jokerCredits ?? 0) > 0 && (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 text-neutral-950 text-[10px] font-black shadow flex items-center gap-1 animate-pulse">
+                                    <span>🃏 {playerObj?.jokerCredits} db Joker X</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="text-[10px] font-mono font-bold text-amber-300">
-                                {playerObj?.partialPoints ?? 0}/{threshold} ⭐
-                              </span>
+                            <div className="text-[9px] text-neutral-400 flex items-center justify-between border-t border-neutral-800/60 pt-1">
+                              <span>💡 <b>Mi a Részpont?</b> A dal egyéb adataiért (előadó/cím) jár. {threshold} db gyűjtésével kapsz 1 <b>Joker X</b>-et!</span>
                               {(playerObj?.jokerCredits ?? 0) > 0 && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-neutral-950 text-[9px] font-black shadow-sm animate-pulse">
-                                  ⭐ {playerObj?.jokerCredits} Joker X
-                                </span>
+                                <span className="text-amber-300 font-bold ml-2 shrink-0">✨ A Joker X bármely színre letehető a táblán!</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 🛠️ HÁZIGAZDA KÉZI FELÜLBÍRÁLÁS (KÜLÖN, VISSZAFOGOTT SÁV) */}
+                        {strictQuizMode && (
+                          <div className="mt-2 pt-1.5 border-t border-neutral-800/60 flex items-center justify-between text-[10px]">
+                            <span className="text-neutral-500 font-medium text-[9px] uppercase tracking-wider">Házigazda kézi korrekció:</span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => grantManualCreditToPlayer(g.playerName)}
+                                className="px-2 py-0.5 rounded-lg bg-neutral-900 hover:bg-emerald-500 hover:text-neutral-950 border border-neutral-700 hover:border-emerald-500 text-neutral-300 font-bold transition text-[10px]"
+                                title="Kézi +1 Kötött X küldése (pl. ha a játékos élőszóban bemondta)"
+                              >
+                                +1 Kötött X
+                              </button>
+                              <button
+                                onClick={() => grantManualJokerCreditToPlayer(g.playerName)}
+                                className="px-2 py-0.5 rounded-lg bg-neutral-900 hover:bg-amber-400 hover:text-neutral-950 border border-neutral-700 hover:border-amber-400 text-amber-300 font-bold transition text-[10px] flex items-center gap-1"
+                                title="Kézi +1 Szabad Joker X küldése (bármelyik színre leteheti a tábláján)"
+                              >
+                                <Sparkles className="w-2.5 h-2.5" />
+                                <span>+1 Joker X</span>
+                              </button>
+                              {(playerObj?.jokerCredits ?? 0) > 0 && (
+                                <button
+                                  onClick={() => revokeManualJokerCreditFromPlayer(g.playerName)}
+                                  className="px-1.5 py-0.5 rounded-lg bg-neutral-900 hover:bg-rose-900/60 border border-neutral-800 hover:border-rose-500 text-neutral-400 hover:text-rose-300 font-bold transition text-[10px]"
+                                  title="Tévesen kiosztott Joker X visszavonása (-1 Joker X)"
+                                >
+                                  -1 Joker
+                                </button>
                               )}
                             </div>
                           </div>
@@ -4219,12 +4299,37 @@ export default function Home() {
                       className="w-full accent-amber-500 cursor-pointer h-2 bg-neutral-800 rounded-lg appearance-none"
                     />
                   </div>
+
+                  {/* FEJLÉC ÉS IKONOK MÉRETE */}
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-neutral-800/60">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold text-neutral-300">Felső Menüsáv & Ikonok Mérete:</span>
+                      <span className="font-mono font-black text-amber-400 bg-neutral-900 px-2 py-0.5 rounded-lg border border-neutral-800 text-xs">
+                        {tvHeaderScale}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="85"
+                      max="150"
+                      step="5"
+                      value={tvHeaderScale}
+                      onChange={(e) => saveTvLayout(tvWheelSize, tvCardWidth, tvGap, parseInt(e.target.value, 10))}
+                      className="w-full accent-amber-500 cursor-pointer h-2 bg-neutral-800 rounded-lg appearance-none"
+                    />
+                    <div className="flex justify-between text-[10px] text-neutral-500 font-mono">
+                      <span>Kicsi (85%)</span>
+                      <span className={tvHeaderScale === 100 ? "text-amber-400 font-bold" : ""}>Normál (100%)</span>
+                      <span className={tvHeaderScale === 125 ? "text-amber-400 font-bold" : ""}>Nagy TV (125%)</span>
+                      <span>Óriás (150%)</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* LÁBLÉC: ALAPÉRTELMEZETT ÉS MENTÉS */}
                 <div className="flex justify-between items-center pt-2 border-t border-neutral-800">
                   <button
-                    onClick={() => saveTvLayout(530, 470, 28)}
+                    onClick={() => saveTvLayout(530, 470, 28, 100)}
                     className="text-xs text-neutral-400 hover:text-amber-400 flex items-center gap-1.5 font-bold transition py-2 px-3 rounded-xl hover:bg-neutral-800/60"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
