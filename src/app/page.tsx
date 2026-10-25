@@ -61,11 +61,21 @@ import confetti from "canvas-confetti";
 const TIME_OPTIONS = [15, 30, 45, 60, 0];
 type MusicFilter = "all" | "hungarian" | "international";
 type SoundEffectType = "airhorn" | "crickets" | "trombone" | "drumroll" | "fanfare";
+type FractionalPointsRate = "off" | "1/3" | "1/5" | "1/10";
+
+const getFractionalThreshold = (rate: FractionalPointsRate): number => {
+  if (rate === "1/3") return 3;
+  if (rate === "1/5") return 5;
+  if (rate === "1/10") return 10;
+  return 0;
+};
 
 interface PlayerGuess {
   playerName: string;
   year: number;
   text: string;
+  artistGuess?: string;
+  titleGuess?: string;
   riskDouble: boolean;
   submittedAt: number;
 }
@@ -90,6 +100,8 @@ interface PlayerSessionStats {
   editCount: number;
   totalResponseTimeMs: number;
   fastestResponseTimeMs: number;
+  partialUnitsTotal?: number;
+  jokerCreditsTotal?: number;
 }
 
 const getFirstLyricTime = (lyrics?: string): number => {
@@ -359,6 +371,9 @@ export default function Home() {
   // 7. SZIGORÚ KVÍZ MÓD (Automata Jutalom X & Csalásvédelem)
   const [strictQuizMode, setStrictQuizMode] = useState<boolean>(true);
 
+  // 9. RÉSZPONTOK BEÁLLÍTÁSA A HÁZIGAZDÁNÁL ("off" | "1/3" | "1/5" | "1/10")
+  const [fractionalPointsRate, setFractionalPointsRate] = useState<FractionalPointsRate>("1/3");
+
   // 1. KÉPERNYŐ-ÉBRENTARTÁS (Wake Lock API)
   const [wakeLockActive, setWakeLockActive] = useState<boolean>(false);
   const wakeLockRef = useRef<any>(null);
@@ -619,11 +634,15 @@ export default function Home() {
   const [isRemoteOpen, setIsRemoteOpen] = useState<boolean>(false);
   const [clientGuessYear, setClientGuessYear] = useState<number>(1995);
   const [clientGuessText, setClientGuessText] = useState<string>("");
+  const [clientGuessArtist, setClientGuessArtist] = useState<string>("");
+  const [clientGuessTitle, setClientGuessTitle] = useState<string>("");
   const [clientRiskDouble, setClientRiskDouble] = useState<boolean>(false);
   const [isGuessLocked, setIsGuessLocked] = useState<boolean>(false);
 
-  // 7. MOBIL JUTALOM X KREDITEK ÉS BÜNTETÉS (Szigorú Kvíz Mód)
+  // 7. MOBIL JUTALOM X KREDITEK, JOKER X ÉS RÉSZPONTOK
   const [clientCredits, setClientCredits] = useState<number>(0);
+  const [clientJokerCredits, setClientJokerCredits] = useState<number>(0);
+  const [clientPartialPoints, setClientPartialPoints] = useState<number>(0);
   const [clientPenaltyDebt, setClientPenaltyDebt] = useState<number>(0);
   const [clientRewardBanner, setClientRewardBanner] = useState<string | null>(null);
 
@@ -640,9 +659,9 @@ export default function Home() {
   const scoredTrackIdRef = useRef<string | number | null>(null);
   const hostHydratedRef = useRef<boolean>(false);
 
-  // Akiknél még fel nem használt X lépés vagy büntetés tartozás van
+  // Akiknél még fel nem használt X lépés, Joker X vagy büntetés tartozás van
   const pendingPlayers = React.useMemo(() => {
-    return players.filter((p) => (p.credits ?? 0) > 0 || (p.debt ?? 0) > 0);
+    return players.filter((p) => (p.credits ?? 0) > 0 || (p.jokerCredits ?? 0) > 0 || (p.debt ?? 0) > 0);
   }, [players]);
 
   // 🎡 Pörgetés indítása csalás- és kihagyásvédelemmel
@@ -701,6 +720,36 @@ export default function Home() {
   useEffect(() => {
     strictQuizModeRef.current = strictQuizMode;
   }, [strictQuizMode]);
+
+  const fractionalPointsRateRef = useRef<FractionalPointsRate>("1/3");
+
+  useEffect(() => {
+    fractionalPointsRateRef.current = fractionalPointsRate;
+  }, [fractionalPointsRate]);
+
+  const cycleFractionalPointsRate = () => {
+    const rates: FractionalPointsRate[] = ["off", "1/3", "1/5", "1/10"];
+    const curIdx = rates.indexOf(fractionalPointsRate);
+    const nextRate = rates[(curIdx + 1) % rates.length];
+    setFractionalPointsRate(nextRate);
+    fractionalPointsRateRef.current = nextRate;
+    try {
+      localStorage.setItem("hit_host_fractional_rate", nextRate);
+    } catch (_) {}
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "game_state",
+        payload: {
+          activeCategory: activeCategoryRef.current,
+          targetType: activeCategoryRef.current?.targetType || "year",
+          doubleOrNothingEnabled: doubleOrNothingRef.current,
+          strictQuizMode: strictQuizModeRef.current,
+          fractionalPointsRate: nextRate,
+        },
+      });
+    }
+  };
 
   const currentTrack = filteredTracks[currentIndex] || allTracks[0];
   const nextPreloadTrack = filteredTracks[nextPreloadIndex] || allTracks[0];
@@ -761,9 +810,13 @@ export default function Home() {
     const savedColorGrid = localStorage.getItem("hit_player_color_grid");
     const savedNotes = localStorage.getItem("hit_player_notes");
     const savedCredits = localStorage.getItem("hit_player_credits");
+    const savedJokerCredits = localStorage.getItem("hit_client_joker_credits");
+    const savedPartialPoints = localStorage.getItem("hit_client_partial_points");
     const savedDebt = localStorage.getItem("hit_player_debt");
 
     if (savedCredits !== null) setClientCredits(Math.max(0, parseInt(savedCredits, 10) || 0));
+    if (savedJokerCredits !== null) setClientJokerCredits(Math.max(0, parseInt(savedJokerCredits, 10) || 0));
+    if (savedPartialPoints !== null) setClientPartialPoints(Math.max(0, parseInt(savedPartialPoints, 10) || 0));
     if (savedDebt !== null) setClientPenaltyDebt(Math.max(0, parseInt(savedDebt, 10) || 0));
 
     if (savedColorGrid) {
@@ -840,6 +893,11 @@ export default function Home() {
       const parsedScale = parseInt(hostTvScale, 10);
       if (parsedScale >= 80 && parsedScale <= 170) setTvScale(parsedScale);
     }
+    const hostFractional = localStorage.getItem("hit_host_fractional_rate");
+    if (hostFractional && ["off", "1/3", "1/5", "1/10"].includes(hostFractional)) {
+      setFractionalPointsRate(hostFractional as FractionalPointsRate);
+      fractionalPointsRateRef.current = hostFractional as FractionalPointsRate;
+    }
 
     hostHydratedRef.current = true;
   }, []);
@@ -852,6 +910,7 @@ export default function Home() {
     localStorage.setItem("hit_host_played_ids", JSON.stringify(playedIds));
     localStorage.setItem("hit_host_session_stats", JSON.stringify(sessionStats));
     localStorage.setItem("hit_host_strict_mode", String(strictQuizMode));
+    localStorage.setItem("hit_host_fractional_rate", fractionalPointsRate);
     localStorage.setItem("hit_host_tv_mode", String(isTvMode));
     localStorage.setItem("hit_host_tv_scale", String(tvScale));
     localStorage.setItem(
@@ -979,6 +1038,7 @@ export default function Home() {
           targetType: activeCategoryRef.current?.targetType || "year",
           doubleOrNothingEnabled: doubleOrNothingRef.current,
           strictQuizMode: strictQuizModeRef.current,
+          fractionalPointsRate: fractionalPointsRateRef.current,
         },
       });
     };
@@ -996,6 +1056,8 @@ export default function Home() {
             hasWon: payload.hasWon,
             isOnline: true,
             credits: payload.credits !== undefined ? payload.credits : updated[existingIdx].credits,
+            jokerCredits: payload.jokerCredits !== undefined ? payload.jokerCredits : updated[existingIdx].jokerCredits,
+            partialPoints: payload.partialPoints !== undefined ? payload.partialPoints : updated[existingIdx].partialPoints,
             debt: payload.debt !== undefined ? payload.debt : updated[existingIdx].debt,
           };
           return updated;
@@ -1011,6 +1073,8 @@ export default function Home() {
               hasWon: payload.hasWon || false,
               isOnline: true,
               credits: payload.credits ?? 0,
+              jokerCredits: payload.jokerCredits ?? 0,
+              partialPoints: payload.partialPoints ?? 0,
               debt: payload.debt ?? 0,
             },
           ];
@@ -1041,9 +1105,15 @@ export default function Home() {
       if (typeof payload.strictQuizMode === "boolean") {
         setStrictQuizMode(payload.strictQuizMode);
       }
+      if (payload.fractionalPointsRate) {
+        setFractionalPointsRate(payload.fractionalPointsRate);
+        fractionalPointsRateRef.current = payload.fractionalPointsRate;
+      }
       if (payload.resetRound) {
         setIsGuessLocked(false);
         setClientGuessText("");
+        setClientGuessArtist("");
+        setClientGuessTitle("");
         setClientRiskDouble(false);
         setClientRewardBanner(null);
       }
@@ -1052,8 +1122,8 @@ export default function Home() {
     // 🔔 FIGYELMEZTETÉS: Még be kell húzni az X-et a telefonon
     channel.on("broadcast", { event: "ping_pending_marks" }, () => {
       if (!isJoinedAsClient) return;
-      if (clientCredits > 0 || clientPenaltyDebt > 0) {
-        setClientRewardBanner("⚠️ Figyelem! Még be kell húznod az X-et a tábládra!");
+      if (clientCredits > 0 || clientJokerCredits > 0 || clientPenaltyDebt > 0) {
+        setClientRewardBanner("⚠️ Figyelem! Még be kell húznod a kapott X-et a tábládra!");
         if (typeof window !== "undefined" && "vibrate" in navigator) {
           try { navigator.vibrate([150, 70, 150, 70, 250]); } catch (_) {}
         }
@@ -1061,22 +1131,49 @@ export default function Home() {
       }
     });
 
-    // 7. AUTOMATA JUTALOM X KREDIT FOGADÁSA A TELEFONON
+    // 7. AUTOMATA JUTALOM X KREDIT & RÉSZPONT FOGADÁSA A TELEFONON
     channel.on("broadcast", { event: "award_credits" }, ({ payload }) => {
       if (!isJoinedAsClient) return;
       const myAward = payload?.awards?.[playerName];
       if (!myAward) return;
 
-      if (myAward.deltaCredits > 0) {
-        setClientCredits((prev) => {
-          const next = prev + myAward.deltaCredits;
-          localStorage.setItem("hit_player_credits", String(next));
-          return next;
-        });
-        setClientRewardBanner(`🎉 +${myAward.deltaCredits} X lépést szereztél! (${myAward.reason})`);
+      const deltaCr = myAward.deltaCredits ?? 0;
+      const deltaJoker = myAward.deltaJokerCredits ?? 0;
+      const earnedUnits = myAward.earnedPartialUnits ?? 0;
+
+      if (deltaCr > 0 || deltaJoker > 0 || earnedUnits > 0) {
+        let bannerText = "";
+        if (deltaCr > 0) {
+          setClientCredits((prev) => {
+            const next = prev + deltaCr;
+            localStorage.setItem("hit_player_credits", String(next));
+            return next;
+          });
+          bannerText += `🎉 +${deltaCr} X a feladvány színére! `;
+        }
+
+        if (deltaJoker > 0) {
+          setClientJokerCredits((prev) => {
+            const next = prev + deltaJoker;
+            localStorage.setItem("hit_client_joker_credits", String(next));
+            return next;
+          });
+          bannerText += `⭐ +${deltaJoker} JOKER X (bármely színre)! `;
+        }
+
+        if (typeof myAward.totalPartialPoints === "number") {
+          setClientPartialPoints(myAward.totalPartialPoints);
+          localStorage.setItem("hit_client_partial_points", String(myAward.totalPartialPoints));
+          if (earnedUnits > 0 && deltaJoker === 0) {
+            bannerText += `⭐ +${earnedUnits} részpont (${myAward.totalPartialPoints}/${myAward.fractionalThreshold} ⭐)`;
+          }
+        }
+
+        setClientRewardBanner(bannerText || `🎉 Sikeres kör! (${myAward.reason})`);
         if (typeof window !== "undefined" && "vibrate" in navigator) {
           try { navigator.vibrate([50, 40, 90]); } catch (_) {}
         }
+        playMarkerSound(true);
       } else if (myAward.penalty > 0) {
         setClientCredits((prev) => {
           if (prev >= myAward.penalty) {
@@ -1157,6 +1254,8 @@ export default function Home() {
               playerName: payload.playerName,
               year: Number(payload.year),
               text: String(payload.text || "").trim(),
+              artistGuess: payload.artistGuess ? String(payload.artistGuess).trim() : undefined,
+              titleGuess: payload.titleGuess ? String(payload.titleGuess).trim() : undefined,
               riskDouble: Boolean(payload.riskDouble),
               submittedAt: now,
             },
@@ -1237,13 +1336,33 @@ export default function Home() {
 
   // Kézi +1 X kredit küldése a TV-ről (pl. Buzzerrel bemondott helyes válaszért)
   const grantManualCreditToPlayer = (targetPlayerName: string) => {
+    setPlayers((prev) =>
+      prev.map((p) => (p.name === targetPlayerName ? { ...p, credits: (p.credits ?? 0) + 1 } : p))
+    );
     if (channelRef.current) {
       channelRef.current.send({
         type: "broadcast",
         event: "award_credits",
         payload: {
           awards: {
-            [targetPlayerName]: { deltaCredits: 1, penalty: 0, reason: "Házigazda jóváhagyás" },
+            [targetPlayerName]: { deltaCredits: 1, deltaJokerCredits: 0, penalty: 0, reason: "Házigazda jóváhagyás (+1 X)" },
+          },
+        },
+      });
+    }
+  };
+
+  const grantManualJokerCreditToPlayer = (targetPlayerName: string) => {
+    setPlayers((prev) =>
+      prev.map((p) => (p.name === targetPlayerName ? { ...p, jokerCredits: (p.jokerCredits ?? 0) + 1 } : p))
+    );
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "award_credits",
+        payload: {
+          awards: {
+            [targetPlayerName]: { deltaCredits: 0, deltaJokerCredits: 1, penalty: 0, reason: "Házigazda Joker X (+1 Joker X)" },
           },
         },
       });
@@ -1281,6 +1400,7 @@ export default function Home() {
       try { navigator.vibrate([30, 50, 30]); } catch (_) {}
     }
     setIsGuessLocked(true);
+    const combined = [clientGuessArtist, clientGuessTitle].filter(Boolean).join(" - ") || clientGuessText;
     if (channelRef.current) {
       channelRef.current.send({
         type: "broadcast",
@@ -1288,7 +1408,9 @@ export default function Home() {
         payload: {
           playerName,
           year: clientGuessYear,
-          text: clientGuessText,
+          text: combined,
+          artistGuess: clientGuessArtist,
+          titleGuess: clientGuessTitle,
           riskDouble: doubleOrNothingEnabled ? clientRiskDouble : false,
         },
       });
@@ -1308,17 +1430,18 @@ export default function Home() {
     }
   };
 
-  // ================= 7. CSALÁSVÉDETT MOBIL TÁBLA KATTINTÁS (SZIGORÚ KVÍZ MÓD ÉS PÖRGETETT SZÍN) =================
+  // ================= 7. CSALÁSVÉDETT MOBIL TÁBLA KATTINTÁS (SZIGORÚ KVÍZ MÓD, PÖRGETETT SZÍN ÉS JOKER X) =================
   const handleClientTileClick = (r: number, c: number) => {
     const isCurrentlyMarked = clientGrid[r][c];
     const willBeMarked = !isCurrentlyMarked;
     const markedCount = clientGrid.flat().filter(Boolean).length;
 
+    const hasJoker = clientJokerCredits > 0;
     const targetColorIdx = getCategoryColorIndex(activeCategory);
     const tileColorIdx = clientColorGrid?.[r]?.[c] ?? ((r + c) % 5);
 
-    // ⛔ CSALÁSVÉDELEM: Csak a pörgetett kategória színére tehető X!
-    if (willBeMarked && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
+    // ⛔ CSALÁSVÉDELEM: Csak a pörgetett kategória színére tehető X (kivéve ha Joker X van)!
+    if (willBeMarked && !hasJoker && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
       setClientRewardBanner(`⛔ Csak a pörgetett színre (${activeCategory?.label || "Aktív szín"}) tehetsz X-et!`);
       if (typeof window !== "undefined" && "vibrate" in navigator) {
         try { navigator.vibrate([100, 50, 100]); } catch (_) {}
@@ -1327,6 +1450,7 @@ export default function Home() {
     }
 
     let newCredits = clientCredits;
+    let newJokerCredits = clientJokerCredits;
     let newDebt = clientPenaltyDebt;
 
     if (strictQuizMode) {
@@ -1335,13 +1459,25 @@ export default function Home() {
           alert("⚠️ Elbuktad a Dupla vagy Semmit! Először radírozz le 1 meglévő X-et a tábládról!");
           return;
         }
-        if (clientCredits <= 0) {
+        if (clientCredits <= 0 && clientJokerCredits <= 0) {
           alert("🔒 Nincs szabad X lépésed! Találd el a feladványt a következő körben az X feloldásához!");
           return;
         }
-        newCredits = Math.max(0, clientCredits - 1);
-        setClientCredits(newCredits);
-        localStorage.setItem("hit_player_credits", String(newCredits));
+
+        // Ha a pörgetettől eltérő színre rakta, de van Joker X-e, a Jokert használja fel:
+        if (hasJoker && (targetColorIdx === -1 || tileColorIdx !== targetColorIdx)) {
+          newJokerCredits = Math.max(0, clientJokerCredits - 1);
+          setClientJokerCredits(newJokerCredits);
+          try { localStorage.setItem("hit_client_joker_credits", String(newJokerCredits)); } catch (_) {}
+        } else if (newCredits > 0) {
+          newCredits = Math.max(0, clientCredits - 1);
+          setClientCredits(newCredits);
+          try { localStorage.setItem("hit_player_credits", String(newCredits)); } catch (_) {}
+        } else if (newJokerCredits > 0) {
+          newJokerCredits = Math.max(0, clientJokerCredits - 1);
+          setClientJokerCredits(newJokerCredits);
+          try { localStorage.setItem("hit_client_joker_credits", String(newJokerCredits)); } catch (_) {}
+        }
       } else {
         // Meglévő X levétele: ha büntetésben volt, letudja a büntetést; különben visszakapja a kreditet, hogy átrakja máshova
         if (clientPenaltyDebt > 0) {
@@ -1384,6 +1520,8 @@ export default function Home() {
           notes: clientNotes,
           hasWon,
           credits: newCredits,
+          jokerCredits: newJokerCredits,
+          partialPoints: clientPartialPoints,
           debt: newDebt,
         },
       });
@@ -1475,6 +1613,7 @@ export default function Home() {
           targetType: cat.targetType,
           doubleOrNothingEnabled,
           strictQuizMode,
+          fractionalPointsRate: fractionalPointsRateRef.current,
           resetRound: true,
         },
       });
@@ -1526,10 +1665,10 @@ export default function Home() {
     return guessList
       .map((g) => {
         const yearDiff = Math.abs(g.year - currentTrack.year);
-        const titleMatch = isFuzzyTextMatch(g.text, currentTrack.title);
-        const artistMatch = isFuzzyTextMatch(g.text, currentTrack.artist);
+        const titleMatch = isFuzzyTextMatch(g.titleGuess || g.text, currentTrack.title);
+        const artistMatch = isFuzzyTextMatch(g.artistGuess || g.text, currentTrack.artist);
 
-        // Kategória-függő győzelmi feltétel
+        // Kategória-függő győzelmi feltétel (NAGYPONT)
         let earnedRegularWin = false;
         if (catId === "c_exact_year" || catId === "y_exact") {
           earnedRegularWin = yearDiff === 0;
@@ -1554,6 +1693,24 @@ export default function Home() {
         const earnedCredits = g.riskDouble ? (wonDouble ? 2 : 0) : earnedRegularWin ? 1 : 0;
         const penalty = g.riskDouble && !wonDouble ? 1 : 0;
 
+        // RÉSZPONT SZÁMÍTÁS (Másodlagos adatok eltalálása)
+        const secondaryReasons: string[] = [];
+        if (guessTarget === "artist") {
+          if (titleMatch) secondaryReasons.push("🎵 Dalcím");
+          if (yearDiff <= 1) secondaryReasons.push(yearDiff === 0 ? "📅 Pontos év" : "📅 Év (±1 év)");
+        } else if (guessTarget === "title") {
+          if (artistMatch) secondaryReasons.push("🎤 Előadó");
+          if (yearDiff <= 1) secondaryReasons.push(yearDiff === 0 ? "📅 Pontos év" : "📅 Év (±1 év)");
+        } else if (guessTarget === "all") {
+          if (yearDiff === 0 && titleMatch && artistMatch) secondaryReasons.push("⭐ Triumvirátus bónusz");
+        } else {
+          // Évszám alapú feladványnál az előadó és cím eltalálása ér részpontot!
+          if (artistMatch) secondaryReasons.push("🎤 Előadó");
+          if (titleMatch) secondaryReasons.push("🎵 Dalcím");
+        }
+
+        const earnedPartialUnits = fractionalPointsRate !== "off" ? secondaryReasons.length : 0;
+
         return {
           ...g,
           yearDiff,
@@ -1563,10 +1720,12 @@ export default function Home() {
           earnedRegularWin,
           earnedCredits,
           penalty,
+          secondaryReasons,
+          earnedPartialUnits,
         };
       })
-      .sort((a, b) => b.earnedCredits - a.earnedCredits || a.yearDiff - b.yearDiff || a.submittedAt - b.submittedAt);
-  }, [guessList, currentTrack, activeCategory, guessTarget]);
+      .sort((a, b) => b.earnedCredits - a.earnedCredits || b.earnedPartialUnits - a.earnedPartialUnits || a.yearDiff - b.yearDiff || a.submittedAt - b.submittedAt);
+  }, [guessList, currentTrack, activeCategory, guessTarget, fractionalPointsRate]);
 
   const handleFlipAndShow = () => {
     const nextFlipped = !isFlipped;
@@ -1580,13 +1739,43 @@ export default function Home() {
         scoredTrackIdRef.current = currentTrack.id;
 
         if (evaluatedGuesses.length > 0) {
-          const awards: Record<string, { deltaCredits: number; penalty: number; reason: string }> = {};
+          const threshold = getFractionalThreshold(fractionalPointsRate);
+          const awards: Record<
+            string,
+            {
+              deltaCredits: number;
+              penalty: number;
+              reason: string;
+              deltaJokerCredits: number;
+              earnedPartialUnits: number;
+              totalPartialPoints: number;
+              fractionalThreshold: number;
+              secondaryReasons: string[];
+            }
+          > = {};
+
           evaluatedGuesses.forEach((g) => {
-            if (g.earnedCredits > 0 || g.penalty > 0) {
+            const playerObj = players.find((p) => p.name === g.playerName);
+            const curPartial = playerObj?.partialPoints ?? 0;
+            const earnedPartial = fractionalPointsRate !== "off" ? g.earnedPartialUnits : 0;
+            const totalUnits = curPartial + earnedPartial;
+            const deltaJokerCredits = fractionalPointsRate !== "off" ? Math.floor(totalUnits / threshold) : 0;
+            const nextPartial = fractionalPointsRate !== "off" ? totalUnits % threshold : curPartial;
+
+            if (g.earnedCredits > 0 || g.penalty > 0 || earnedPartial > 0 || deltaJokerCredits > 0) {
               awards[g.playerName] = {
                 deltaCredits: g.earnedCredits,
                 penalty: g.penalty,
-                reason: g.wonDouble ? "Dupla vagy Semmi telitalálat!" : "Helyes tipp!",
+                reason: g.wonDouble
+                  ? "Dupla vagy Semmi telitalálat!"
+                  : g.earnedRegularWin
+                  ? "Helyes feladvány tipp!"
+                  : "Részpont találat!",
+                deltaJokerCredits,
+                earnedPartialUnits: earnedPartial,
+                totalPartialPoints: nextPartial,
+                fractionalThreshold: threshold,
+                secondaryReasons: g.secondaryReasons,
               };
             }
           });
@@ -1607,10 +1796,13 @@ export default function Home() {
                 editCount: 0,
                 totalResponseTimeMs: 0,
                 fastestResponseTimeMs: 999999,
+                partialUnitsTotal: 0,
+                jokerCreditsTotal: 0,
               };
 
               const isExact = g.yearDiff === 0;
               const isNewMax = g.yearDiff > (cur.maxYearDiff || 0);
+              const playerAward = awards[g.playerName];
 
               next[g.playerName] = {
                 ...cur,
@@ -1624,6 +1816,8 @@ export default function Home() {
                 riskCount: cur.riskCount + (g.riskDouble ? 1 : 0),
                 riskWonCount: (cur.riskWonCount || 0) + (g.wonDouble ? 1 : 0),
                 riskLostCount: (cur.riskLostCount || 0) + (g.riskDouble && !g.wonDouble ? 1 : 0),
+                partialUnitsTotal: (cur.partialUnitsTotal || 0) + (playerAward?.earnedPartialUnits ?? 0),
+                jokerCreditsTotal: (cur.jokerCreditsTotal || 0) + (playerAward?.deltaJokerCredits ?? 0),
               };
             });
             return next;
@@ -1638,11 +1832,13 @@ export default function Home() {
                 ...p,
                 credits: (p.credits ?? 0) + award.deltaCredits,
                 debt: (p.debt ?? 0) + award.penalty,
+                jokerCredits: (p.jokerCredits ?? 0) + (award.deltaJokerCredits || 0),
+                partialPoints: award.totalPartialPoints ?? p.partialPoints ?? 0,
               };
             })
           );
 
-          // Jutalom X kreditek kiküldése a telefonokra
+          // Jutalom X kreditek és Részpontok kiküldése a telefonokra
           if (channelRef.current && Object.keys(awards).length > 0) {
             channelRef.current.send({
               type: "broadcast",
@@ -1948,6 +2144,8 @@ export default function Home() {
         buzzerCount: st.buzzerCount || 0,
         riskWon: st.riskWonCount || 0,
         riskTotal: st.riskCount || 0,
+        partialUnitsTotal: st.partialUnitsTotal || 0,
+        jokerCreditsTotal: st.jokerCreditsTotal || 0,
       };
     });
 
@@ -2177,29 +2375,86 @@ export default function Home() {
                 </button>
               )}
 
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={clientGuessText}
-                  onChange={(e) => {
-                    setIsGuessLocked(false);
-                    setClientGuessText(e.target.value);
-                  }}
-                  placeholder="Előadó / Dalcím (ékezet nélkül is jó)..."
-                  className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
-                />
-                <button
-                  onClick={handleClientSubmitGuess}
-                  className={`px-3.5 py-2 rounded-xl font-black text-xs uppercase flex items-center gap-1 transition active:scale-95 ${
-                    isGuessLocked
-                      ? "bg-emerald-500 text-neutral-950"
-                      : "bg-amber-500 hover:bg-amber-400 text-neutral-950"
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{isGuessLocked ? "Frissít" : "Küldés"}</span>
-                </button>
-              </div>
+              {fractionalPointsRate !== "off" ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-[10px] text-amber-300 font-bold px-1">
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-amber-400" />
+                      <span>Részpont mezők ({fractionalPointsRate} Joker X-ért):</span>
+                    </span>
+                    <span className="text-neutral-400 font-mono text-[9px]">külön mezők a pontosságért</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      type="text"
+                      value={clientGuessArtist}
+                      onChange={(e) => {
+                        setIsGuessLocked(false);
+                        setClientGuessArtist(e.target.value);
+                      }}
+                      placeholder="🎤 Előadó..."
+                      className="bg-neutral-950 border border-neutral-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                    <input
+                      type="text"
+                      value={clientGuessTitle}
+                      onChange={(e) => {
+                        setIsGuessLocked(false);
+                        setClientGuessTitle(e.target.value);
+                      }}
+                      placeholder="🎵 Dalcím..."
+                      className="bg-neutral-950 border border-neutral-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={clientGuessText}
+                      onChange={(e) => {
+                        setIsGuessLocked(false);
+                        setClientGuessText(e.target.value);
+                      }}
+                      placeholder="vagy egyben mindkettő..."
+                      className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-neutral-300 focus:outline-none focus:border-amber-400"
+                    />
+                    <button
+                      onClick={handleClientSubmitGuess}
+                      className={`px-3.5 py-1.5 rounded-xl font-black text-xs uppercase flex items-center gap-1 transition active:scale-95 ${
+                        isGuessLocked
+                          ? "bg-emerald-500 text-neutral-950"
+                          : "bg-amber-500 hover:bg-amber-400 text-neutral-950"
+                      }`}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{isGuessLocked ? "Frissít" : "Küldés"}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={clientGuessText}
+                    onChange={(e) => {
+                      setIsGuessLocked(false);
+                      setClientGuessText(e.target.value);
+                    }}
+                    placeholder="Előadó / Dalcím (ékezet nélkül is jó)..."
+                    className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    onClick={handleClientSubmitGuess}
+                    className={`px-3.5 py-2 rounded-xl font-black text-xs uppercase flex items-center gap-1 transition active:scale-95 ${
+                      isGuessLocked
+                        ? "bg-emerald-500 text-neutral-950"
+                        : "bg-amber-500 hover:bg-amber-400 text-neutral-950"
+                    }`}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isGuessLocked ? "Frissít" : "Küldés"}</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-2 flex flex-col gap-1.5">
@@ -2274,6 +2529,46 @@ export default function Home() {
                 </div>
               )}
 
+              {/* ⭐ RÉSZPONT PROGRESSZIÓ A TELEFONON */}
+              {fractionalPointsRate !== "off" && (
+                <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-neutral-950 border border-amber-500/30 text-[11px]">
+                  <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Részpont haladás:</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1">
+                      {Array.from({ length: getFractionalThreshold(fractionalPointsRate) }).map((_, i) => (
+                        <span
+                          key={i}
+                          className={`w-2.5 h-2.5 rounded-full border transition ${
+                            i < clientPartialPoints
+                              ? "bg-amber-400 border-amber-300 shadow-[0_0_6px_rgba(245,158,11,0.8)]"
+                              : "bg-neutral-800 border-neutral-700"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <span className="font-mono font-black text-xs text-amber-300">
+                      {clientPartialPoints}/{getFractionalThreshold(fractionalPointsRate)} ⭐
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* ⭐ JOKER X RENDELKEZÉSRE ÁLLÁS JELZŐSÁV */}
+              {clientJokerCredits > 0 && (
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/30 to-yellow-500/20 border-2 border-amber-400 text-xs font-black text-amber-200 animate-pulse">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>⭐ {clientJokerCredits} JOKER X ELÉRHETŐ!</span>
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wider bg-amber-400 text-neutral-950 px-2 py-0.5 rounded-lg shadow-sm">
+                    Bármely színre teheted!
+                  </span>
+                </div>
+              )}
+
               {/* 🎯 AKTÍV PÖRGETETT SZÍN JELZŐSÁV MOBILON */}
               {activeCategory && (
                 <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-neutral-900 border border-neutral-800 text-xs">
@@ -2291,9 +2586,10 @@ export default function Home() {
                     const tileColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
                     const colorIdx = clientColorGrid?.[r]?.[c] ?? ((r + c) % tileColors.length);
                     const targetColorIdx = getCategoryColorIndex(activeCategory);
-                    const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx;
-                    const isHighlight = !isMarked && targetColorIdx !== -1 && isTargetColor;
-                    const isDimmed = !isMarked && targetColorIdx !== -1 && !isTargetColor;
+                    const hasJoker = clientJokerCredits > 0;
+                    const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx || hasJoker;
+                    const isHighlight = !isMarked && (hasJoker || (targetColorIdx !== -1 && isTargetColor));
+                    const isDimmed = !isMarked && !hasJoker && targetColorIdx !== -1 && !isTargetColor;
 
                     return (
                       <button
@@ -2481,6 +2777,21 @@ export default function Home() {
                 <Dices className="w-3.5 h-3.5" />
                 <span className="hidden lg:inline">Dupla/Semmi:</span>
                 <span>{doubleOrNothingEnabled ? "BE" : "KI"}</span>
+              </button>
+
+              {/* ⭐ RÉSZPONT RENDSZER KAPCSOLÓ (KI / 1/3 / 1/5 / 1/10) */}
+              <button
+                onClick={cycleFractionalPointsRate}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition ${
+                  fractionalPointsRate !== "off"
+                    ? "bg-amber-500/20 border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="Részpont (törtpontok másodlagos adatokért: előadó, cím vagy évszám) -> Joker X beváltás tetszőleges színre"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden lg:inline">Részpont:</span>
+                <span className="font-mono font-black">{fractionalPointsRate === "off" ? "KI" : fractionalPointsRate}</span>
               </button>
 
               <button
@@ -2880,78 +3191,132 @@ export default function Home() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {evaluatedGuesses.map((g, idx) => {
                     const isExact = g.yearDiff === 0;
                     const isClose2 = g.yearDiff > 0 && g.yearDiff <= 2;
                     const isClose5 = g.yearDiff > 2 && g.yearDiff <= 5;
+                    const playerObj = players.find((p) => p.name === g.playerName);
+                    const threshold = getFractionalThreshold(fractionalPointsRate);
+                    const hasSecondary = (g.secondaryReasons?.length || 0) > 0;
 
                     return (
                       <div
                         key={g.playerName}
-                        className={`flex items-center justify-between p-2.5 rounded-2xl border ${
+                        className={`flex flex-col p-3 rounded-2xl border transition ${
                           isExact || g.earnedCredits > 0
-                            ? "bg-amber-500/20 border-amber-400 text-amber-200"
+                            ? "bg-amber-500/15 border-amber-400/80 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.15)]"
                             : isClose2
-                            ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
                             : isClose5
-                            ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-200"
-                            : "bg-neutral-950 border-neutral-800 text-neutral-400"
+                            ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-200"
+                            : "bg-neutral-950/90 border-neutral-800 text-neutral-400"
                         }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">
-                            {isExact ? "🥇" : isClose2 ? "🥈" : isClose5 ? "🥉" : "❌"}
-                          </span>
-                          <div>
-                            <div className="font-black text-xs uppercase text-white flex items-center gap-1.5 flex-wrap">
-                              <span>
-                                {idx + 1}. {g.playerName}
-                              </span>
-                              {g.riskDouble ? (
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
-                                    g.wonDouble ? "bg-amber-400 text-neutral-950" : "bg-rose-600 text-white"
-                                  }`}
-                                >
-                                  {g.wonDouble ? "🎰 DUPLA (+2 X)" : "💀 BUKTA (-1 X)"}
+                        {/* FELSŐ SÁV: JÁTÉKOS NEVE ÉS NAGYPONT STÁTUSZ */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">
+                              {isExact ? "🥇" : isClose2 ? "🥈" : isClose5 ? "🥉" : "❌"}
+                            </span>
+                            <div>
+                              <div className="font-black text-xs uppercase text-white flex items-center gap-1.5 flex-wrap">
+                                <span>
+                                  {idx + 1}. {g.playerName}
                                 </span>
-                              ) : (
-                                g.earnedCredits > 0 && (
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-neutral-950 text-[9px] font-black">
-                                    +{g.earnedCredits} X KREDIT
+                                {g.riskDouble ? (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
+                                      g.wonDouble ? "bg-amber-400 text-neutral-950" : "bg-rose-600 text-white"
+                                    }`}
+                                  >
+                                    {g.wonDouble ? "🎰 DUPLA NAGYPONT (+2 X)" : "💀 BUKTA (-1 X)"}
                                   </span>
-                                )
+                                ) : g.earnedCredits > 0 ? (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-neutral-950 text-[9px] font-black shadow-sm">
+                                    +{g.earnedCredits} X NAGYPONT ({activeCategory?.label || "Kötött szín"})
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 text-[9px] font-bold">
+                                    Nincs nagypont
+                                  </span>
+                                )}
+                              </div>
+                              {(g.artistGuess || g.titleGuess || g.text) && (
+                                <div className="text-[10px] text-neutral-300 mt-0.5">
+                                  {g.artistGuess || g.titleGuess ? (
+                                    <span>
+                                      🎤 {g.artistGuess || "-"} • 🎵 {g.titleGuess || "-"}
+                                    </span>
+                                  ) : (
+                                    <span>Tipp: „{g.text}”</span>
+                                  )}
+                                  {(g.titleMatch || g.artistMatch) && (
+                                    <span className="text-emerald-400 font-bold ml-1">🎯</span>
+                                  )}
+                                </div>
                               )}
                             </div>
-                            {g.text && (
-                              <div className="text-[10px] text-neutral-300">
-                                Tipp: „{g.text}”{" "}
-                                {(g.titleMatch || g.artistMatch) && (
-                                  <span className="text-emerald-400 font-bold">(Fuzzy Találat! 🎯)</span>
-                                )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="text-right font-mono">
+                              <div className="text-sm font-black">{g.year}</div>
+                              <div className="text-[10px] font-bold">
+                                {isExact ? "TELITALÁLAT!" : `±${g.yearDiff} év`}
+                              </div>
+                            </div>
+                            {strictQuizMode && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => grantManualCreditToPlayer(g.playerName)}
+                                  className="px-1.5 py-1 rounded-lg bg-neutral-800 hover:bg-emerald-500 hover:text-neutral-950 text-emerald-400 transition text-[10px] font-black"
+                                  title="Plusz 1 X lépés (pörgetett szín) küldése"
+                                >
+                                  +1 X
+                                </button>
+                                <button
+                                  onClick={() => grantManualJokerCreditToPlayer(g.playerName)}
+                                  className="px-1.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-400 hover:text-neutral-950 text-amber-300 border border-amber-400/50 transition text-[10px] font-black flex items-center gap-0.5"
+                                  title="Kézi Joker X adása (bármely színre tehető)"
+                                >
+                                  <Sparkles className="w-2.5 h-2.5" />
+                                  <span>+⭐</span>
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <div className="text-right font-mono">
-                            <div className="text-sm font-black">{g.year}</div>
-                            <div className="text-[10px] font-bold">
-                              {isExact ? "TELITALÁLAT!" : `±${g.yearDiff} év`}
+                        {/* ⭐ KÜLÖNÁLLÓ RÉSZPONT SZEKCIÓ (TÖLTI A JOKER X-ET) */}
+                        {fractionalPointsRate !== "off" && (
+                          <div className="mt-2 pt-2 border-t border-neutral-800/80 flex items-center justify-between gap-2 bg-black/40 -mx-1 -mb-1 p-2 rounded-xl">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-black uppercase text-amber-300 flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-amber-400" />
+                                <span>Részpont ({fractionalPointsRate}):</span>
+                              </span>
+                              {hasSecondary ? (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 text-[10px] font-bold border border-amber-400/40">
+                                  +{g.earnedPartialUnits}× ({g.secondaryReasons.join(" • ")})
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-neutral-500 italic">Nincs másodlagos találat</span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] font-mono font-bold text-amber-300">
+                                {playerObj?.partialPoints ?? 0}/{threshold} ⭐
+                              </span>
+                              {(playerObj?.jokerCredits ?? 0) > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-neutral-950 text-[9px] font-black shadow-sm animate-pulse">
+                                  ⭐ {playerObj?.jokerCredits} Joker X
+                                </span>
+                              )}
                             </div>
                           </div>
-                          {strictQuizMode && (
-                            <button
-                              onClick={() => grantManualCreditToPlayer(g.playerName)}
-                              className="p-1.5 rounded-lg bg-neutral-800 hover:bg-emerald-500 hover:text-neutral-950 text-emerald-400 transition text-[10px] font-black"
-                              title="Plusz 1 X lépés küldése a játékos telefonjára"
-                            >
-                              +1 X
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     );
                   })}
@@ -3434,6 +3799,7 @@ export default function Home() {
                         <tr className="border-b border-neutral-800 text-neutral-400 font-bold uppercase tracking-wider text-[10px]">
                           <th className="p-2.5">Helyezés & Játékos</th>
                           <th className="p-2.5 text-center">X / 25</th>
+                          <th className="p-2.5 text-center">⭐ Rész / Joker</th>
                           <th className="p-2.5 text-center">Tippek</th>
                           <th className="p-2.5 text-center">Átl. Idő</th>
                           <th className="p-2.5 text-center">Leggyorsabb</th>
@@ -3466,6 +3832,11 @@ export default function Home() {
                               {st.hasWon && <span className="text-[10px] text-amber-400">🏆</span>}
                             </td>
                             <td className="p-2.5 text-center font-bold font-mono text-amber-400">{st.score}</td>
+                            <td className="p-2.5 text-center font-mono text-amber-300 font-bold">
+                              {st.partialUnitsTotal > 0 || st.jokerCreditsTotal > 0
+                                ? `${st.partialUnitsTotal}⭐ (${st.jokerCreditsTotal} Joker)`
+                                : "-"}
+                            </td>
                             <td className="p-2.5 text-center text-neutral-400">{st.guessesCount}</td>
                             <td className="p-2.5 text-center font-mono text-cyan-300">
                               {st.avgResponseSec !== "-" ? `${st.avgResponseSec}s` : "-"}
@@ -3570,6 +3941,7 @@ export default function Home() {
                 <div className="flex flex-col gap-2 max-h-60 overflow-y-auto">
                   {pendingPlayers.map((p) => {
                     const cr = p.credits ?? 0;
+                    const jcr = p.jokerCredits ?? 0;
                     const db = p.debt ?? 0;
                     return (
                       <div
@@ -3582,11 +3954,17 @@ export default function Home() {
                           </span>
                           <span className="font-bold text-white text-sm">{p.name}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           {cr > 0 && (
                             <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-bold text-xs flex items-center gap-1">
                               <span>+{cr} X</span>
-                              <span className="text-[10px] text-emerald-400 font-medium">behúzás vár</span>
+                              <span className="text-[10px] text-emerald-400 font-medium">kötött szín</span>
+                            </span>
+                          )}
+                          {jcr > 0 && (
+                            <span className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 font-bold text-xs flex items-center gap-1">
+                              <span>⭐ +{jcr} Joker X</span>
+                              <span className="text-[10px] text-amber-400 font-medium">bármely szín</span>
                             </span>
                           )}
                           {db > 0 && (

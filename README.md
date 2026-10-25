@@ -42,6 +42,7 @@ A **Hit-Roulette** egy modern, böngészőből futtatható parti társasjáték,
 | **Következő dal előtöltése** | A háttérben azonnal előkészíti és puffereli a következő kör dalát a folyamatos játékélményért. |
 | **Szigorú Kvíz Mód & Csalásvédelem** | Automatikus pontszámítás: csak az tehet le X-et a táblájára, aki helyesen tippel. A sikertelen „Dupla vagy Semmi” büntetéssel jár (radírozás). |
 | **Kipörgetett Színhez Kötött X Behúzás** | Csak a kerekén kipörgetett kategória színével megegyező mezőkre tehető X. A többi mező zárolt és halványított, a megfelelő mezők pulzáló fénnyel vezetnek. |
+| **Részpont (Törtpont) Rendszer & Joker X** | Ha a feladvány pl. megjelenési év, de a játékos tudja az előadót vagy címet is, konfigurálható arányú törtpontot kap (`KI`, `1/3`, `1/5`, `1/10`), ami 1 egészre gyűlve tetszőleges színre letehető **Joker X**-re váltódik át! |
 | **Pörgetési Zár (Kihagyás- & Csalásvédelem)** | Ha van olyan játékos, aki még nem húzta be a megérdemelt X-et (vagy nem vonta le a büntetést), a kerék nem indulhat el; figyelmeztető ablak és mobil rezgés ébreszti. |
 | **Részletes Díjátadó & Karakter Különdíjak** | 8 egyedi különdíj (👑 Bajnok, 🎯 Sniper, ⚡ Villámagyú reakcióidő, 🤔 Taktikus átíró, ⏳ Időutazó mellélövés dalcímmel, 🔔 Buzzer, 🎲 Kaszinó királya, 💀 Főnix) + Részletes Játékos Kartoték és statisztikai táblázat. |
 | **Fuzzy Levenshtein értékelés** | Ékezetmentesítő, írásjel-eltávolító és 75%-os elgépeléstűrő Levenshtein távolság motor a szöveges tippekhez. |

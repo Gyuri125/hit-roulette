@@ -38,7 +38,9 @@ export interface PlayerData {
   colorGrid?: number[][]; // 5x5 mátrix a színek indexeivel (0..4)
   hasWon: boolean;
   isOnline?: boolean;
-  credits?: number; // még behúzandó X lépések
+  credits?: number; // még behúzandó X lépések a pörgetett színre
+  jokerCredits?: number; // bármilyen színre behúzható Joker X-ek (részpontokból)
+  partialPoints?: number; // felhalmozott részpont egységek (pl. 2 db 1/3-as)
   debt?: number;    // büntetésből radírozandó X
 }
 
@@ -170,12 +172,13 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     if (!targetPlayer) return;
     const willBeMarked = !targetPlayer.grid[rIdx][cIdx];
 
+    const hasJoker = (targetPlayer.jokerCredits ?? 0) > 0;
     const targetColorIdx = getCategoryColorIndex(activeCategory);
     const tileColorIdx = targetPlayer.colorGrid?.[rIdx]?.[cIdx] ?? ((rIdx + cIdx) % TILE_COLORS.length);
 
-    // ⛔ CSALÁSVÉDELEM: Csak a pörgetett színre engedélyezett az X behúzása!
-    if (willBeMarked && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
-      alert(`⛔ Csak a pörgetett kategória színére (${activeCategory?.label || "Kiválasztott szín"}) tehetsz X-et!`);
+    // ⛔ CSALÁSVÉDELEM: Csak a pörgetett színre engedélyezett az X behúzása (kivéve ha Joker X van!)
+    if (willBeMarked && !hasJoker && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
+      alert(`⛔ Csak a pörgetett kategória színére (${activeCategory?.label || "Kiválasztott szín"}) tehetsz X-et! (Joker X esetén bármilyen szín megjelölhető)`);
       return;
     }
 
@@ -207,7 +210,32 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           });
         }
 
-        return { ...player, grid: newGrid, hasWon: won };
+        let newCredits = player.credits ?? 0;
+        let newJokerCredits = player.jokerCredits ?? 0;
+        let newDebt = player.debt ?? 0;
+
+        if (willBeMarked) {
+          if (hasJoker && (targetColorIdx === -1 || tileColorIdx !== targetColorIdx)) {
+            newJokerCredits = Math.max(0, newJokerCredits - 1);
+          } else if (newCredits > 0) {
+            newCredits = Math.max(0, newCredits - 1);
+          } else if (newJokerCredits > 0) {
+            newJokerCredits = Math.max(0, newJokerCredits - 1);
+          }
+        } else {
+          if (newDebt > 0) {
+            newDebt = Math.max(0, newDebt - 1);
+          }
+        }
+
+        return {
+          ...player,
+          grid: newGrid,
+          hasWon: won,
+          credits: newCredits,
+          jokerCredits: newJokerCredits,
+          debt: newDebt,
+        };
       })
     );
   };
@@ -389,10 +417,11 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                     row.map((isMarked, c) => {
                       const isWinTile = pWinCells.has(`${r}-${c}`);
                       const colorIdx = player.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
+                      const hasJoker = (player.jokerCredits ?? 0) > 0;
                       const targetColorIdx = getCategoryColorIndex(activeCategory);
-                      const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx;
-                      const isHighlight = !isMarked && targetColorIdx !== -1 && isTargetColor;
-                      const isDimmed = !isMarked && targetColorIdx !== -1 && !isTargetColor;
+                      const isTargetColor = hasJoker || targetColorIdx === -1 || colorIdx === targetColorIdx;
+                      const isHighlight = !isMarked && (hasJoker || (targetColorIdx !== -1 && isTargetColor));
+                      const isDimmed = !isMarked && !hasJoker && targetColorIdx !== -1 && !isTargetColor;
 
                       return (
                         <button
@@ -471,16 +500,28 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
             </div>
           )}
 
+          {/* ⭐ JOKER X JELZŐSÁV */}
+          {(currentPlayer.jokerCredits ?? 0) > 0 && (
+            <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-400 text-xs font-bold text-amber-300 animate-pulse">
+              <span className="flex items-center gap-1.5">
+                <span>⭐</span>
+                <span>{currentPlayer.jokerCredits} Joker X elérhető!</span>
+              </span>
+              <span className="text-[11px] text-amber-200">Bármelyik színre leteheted!</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800/80">
             {currentPlayer.grid.map((row, r) =>
               row.map((isMarked, c) => {
                 const colorIdx = currentPlayer.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
                 const color = TILE_COLORS[colorIdx];
                 const isWinCell = winningCells.has(`${r}-${c}`);
+                const hasJoker = (currentPlayer.jokerCredits ?? 0) > 0;
                 const targetColorIdx = getCategoryColorIndex(activeCategory);
-                const isTargetColor = targetColorIdx === -1 || colorIdx === targetColorIdx;
-                const isHighlight = !isMarked && targetColorIdx !== -1 && isTargetColor;
-                const isDimmed = !isMarked && targetColorIdx !== -1 && !isTargetColor;
+                const isTargetColor = hasJoker || targetColorIdx === -1 || colorIdx === targetColorIdx;
+                const isHighlight = !isMarked && (hasJoker || (targetColorIdx !== -1 && isTargetColor));
+                const isDimmed = !isMarked && !hasJoker && targetColorIdx !== -1 && !isTargetColor;
 
                 return (
                   <button

@@ -172,7 +172,15 @@ Host and players communicate on channel `room_${roomCode}` using broadcast event
   - 🔔 **A Villámcsengő**: Legtöbb sikeres buzzer lenyomás.
   - 🎲 **A Kaszinók Királya**: Dupla vagy Semmi kockáztatások száma és sikeressége.
   - 💀 **A Feltámadó Főnix**: Legtöbb elbukott büntetés után is küzdő játékos.
-- **Részletes Kartoték**: Teljes interaktív összehasonlító táblázat minden játékos statisztikájával (átlagos/leggyorsabb válaszidő, hibaszázalék, átírások, kockáztatások).
+- **Részletes Kartoték**: Teljes interaktív összehasonlító táblázat minden játékos statisztikájával (átlagos/leggyorsabb válaszidő, hibaszázalék, átírások, kockáztatások, valamint Részpont és Joker X mérleg).
+
+### 8. Részpont (Törtpont) Rendszer & Joker X Beváltás
+- **Koncepció**: A játékosok ösztönzése arra, hogy a fő feladványon kívül a dal egyéb adatait is megtippeljék (pl. ha a kerék megjelenési évet húzott, de a játékos tudja az előadót és/vagy a dalcímet, részpontokat gyűjt).
+- **Konfigurálható Átváltási Arány (`fractionalPointsRate`)**:
+  - Házigazda felső sávjából és távirányítóról állítható: `KI` (kikapcsolva), `1/3` (3 részpont = 1 Joker X), `1/5` (5 részpont = 1 Joker X), `1/10` (10 részpont = 1 Joker X).
+- **Joker X Beváltás**: Amikor az összegyűlt részpontok elérik a beállított arányt (pl. 3/3), automatikusan 1 teljes **Joker X** kreditet kap a játékos, ami feloldja a színzárat: a játékos **TETSZŐLEGES színre** helyezheti el a tábláján!
+- **Külön Vizuális Elválasztás**: A kártya felfordításakor (`isFlipped`) a TV képernyőn a Nagypont (`+1 X [Kötött Szín]`) és a Részpont (`⭐ +1× Részpont: 🎤 Előadó ✓ • Haladás: 2/3 ⭐`) teljesen különálló, látványos kártyarészben jelenik meg.
+- **Kézi Felülbírálás & Táblázatos Mérleg**: A Házigazda a kiértékelésben `+⭐` gombbal közvetlenül is küldhet Joker X-et, a Díjátadó részletes kartotékában pedig külön oszlop mutatja a játékosok összesített részpontjait és Joker X váltásait.
 
 ---
 
