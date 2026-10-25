@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone, Eraser, LayoutGrid } from "lucide-react";
+import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone, Eraser, LayoutGrid, Shuffle } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Category } from "./RouletteWheel";
 
@@ -19,9 +19,31 @@ export interface PlayerData {
   name: string;
   notes: string;
   grid: boolean[][];
+  colorGrid?: number[][]; // 5x5 mátrix a színek indexeivel (0..4)
   hasWon: boolean;
   isOnline?: boolean;
 }
+
+// 🎲 Kiegyensúlyozott véletlenszerű 5x5 táblagenerátor (minden színből pontosan 5 db)
+export const generateRandomColorGrid = (): number[][] => {
+  const flat: number[] = [];
+  for (let color = 0; color < 5; color++) {
+    for (let count = 0; count < 5; count++) {
+      flat.push(color);
+    }
+  }
+  for (let i = flat.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = flat[i];
+    flat[i] = flat[j];
+    flat[j] = temp;
+  }
+  const result: number[][] = [];
+  for (let r = 0; r < 5; r++) {
+    result.push(flat.slice(r * 5, (r + 1) * 5));
+  }
+  return result;
+};
 
 export const createEmptyGrid = () =>
   Array(5)
@@ -170,7 +192,16 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     setPlayers((prev) => prev.map((p, idx) => (idx === activePlayerIdx ? { ...p, notes } : p)));
   };
 
-  const addPlayer = () => {
+    React.useEffect(() => {
+      const needsColorGrid = players.some((p) => !p.colorGrid || p.colorGrid.length !== 5);
+      if (needsColorGrid) {
+        setPlayers((prev) =>
+          prev.map((p) => (!p.colorGrid || p.colorGrid.length !== 5 ? { ...p, colorGrid: generateRandomColorGrid() } : p))
+        );
+      }
+    }, []);
+
+    const addPlayer = () => {
     if (players.length >= 10) return;
     const newIdx = players.length + 1;
     const newPlayer: PlayerData = {
@@ -178,6 +209,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
       name: `Játékos ${newIdx}`,
       notes: "",
       grid: createEmptyGrid(),
+      colorGrid: generateRandomColorGrid(),
       hasWon: false,
     };
     setPlayers((prev) => [...prev, newPlayer]);
@@ -193,6 +225,12 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   const resetCurrentGrid = () => {
     setPlayers((prev) =>
       prev.map((p, idx) => (idx === activePlayerIdx ? { ...p, grid: createEmptyGrid(), hasWon: false } : p))
+    );
+  };
+
+  const rerollColors = () => {
+    setPlayers((prev) =>
+      prev.map((p, idx) => (idx === activePlayerIdx ? { ...p, colorGrid: generateRandomColorGrid() } : p))
     );
   };
 
@@ -322,7 +360,8 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                   {player.grid.map((row, r) =>
                     row.map((isMarked, c) => {
                       const isWinTile = pWinCells.has(`${r}-${c}`);
-                      return (
+                        const colorIdx = player.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
+                        return (
                         <button
                           key={`${r}-${c}`}
                           onClick={(e) => {
@@ -332,7 +371,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                           className={`aspect-square rounded-lg flex items-center justify-center font-black text-lg text-neutral-950 transition ${
                             isWinTile ? "ring-2 ring-white scale-105 z-10" : ""
                           }`}
-                          style={{ backgroundColor: TILE_COLORS[(r + c) % TILE_COLORS.length] }}
+                          style={{ backgroundColor: TILE_COLORS[colorIdx] }}
                         >
                           {isMarked ? "✕" : ""}
                         </button>
@@ -387,7 +426,8 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           <div className="grid grid-cols-5 gap-2 w-full bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800/80">
             {currentPlayer.grid.map((row, r) =>
               row.map((isMarked, c) => {
-                const color = TILE_COLORS[(r + c) % TILE_COLORS.length];
+                const colorIdx = currentPlayer.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
+                const color = TILE_COLORS[colorIdx];
                 const isWinCell = winningCells.has(`${r}-${c}`);
                 return (
                   <button
@@ -446,7 +486,14 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           </div>
 
           <div className="w-full flex justify-between items-center text-[10px] text-neutral-500 px-1 pt-0.5">
-            <span>Kattints az X-eléshez</span>
+            <button
+              onClick={rerollColors}
+              className="hover:text-amber-400 flex items-center gap-1 transition"
+              title="A tábla színeinek véletlenszerű újrakeverése"
+            >
+              <Shuffle className="w-3 h-3 text-amber-400" />
+              <span>Színek újrakeverése</span>
+            </button>
             <button
               onClick={resetCurrentGrid}
               className="hover:text-rose-400 flex items-center gap-1 transition"
