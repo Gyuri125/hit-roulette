@@ -12,3 +12,4 @@ processor_debug.log
 Track list/
 zenek/
 .env*.local
+*.tsbuildinfo

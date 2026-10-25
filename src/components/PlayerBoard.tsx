@@ -105,6 +105,8 @@ interface PlayerBoardProps {
   onStartSpinAndMusic?: () => void;
   isPlayingMusic?: boolean;
   activeCategory?: Category | null;
+  tvMode?: boolean;
+  tvScale?: number;
 }
 
 export const PlayerBoard: React.FC<PlayerBoardProps> = ({
@@ -114,6 +116,8 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   setActivePlayerIdx,
   onStartSpinAndMusic,
   isPlayingMusic,
+  tvMode = false,
+  tvScale = 100,
 }) => {
   const [winnerAlert, setWinnerAlert] = useState<string | null>(null);
   const [showAllBoards, setShowAllBoards] = useState<boolean>(false);
@@ -286,7 +290,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
       </div>
 
       {showAllBoards ? (
-        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+        <div className={`w-full grid ${tvMode ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"} pt-2`}>
           {players.map((player, pIdx) => {
             const pScore = player.grid.flat().filter(Boolean).length;
             const pWinCells = getWinningCells(player.grid);
@@ -347,7 +351,9 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           })}
         </div>
       ) : (
-        <div className="relative w-full max-w-sm rounded-[32px] bg-neutral-900 border-4 border-neutral-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-4 sm:p-5 flex flex-col items-center gap-3.5">
+        <div className={`relative w-full rounded-[32px] bg-neutral-900 border-4 border-neutral-800 shadow-[0_20px_50px_rgba(0,0,0,0.9)] flex flex-col items-center transition-all ${
+          tvMode ? "max-w-md sm:max-w-lg p-6 sm:p-7 gap-4" : "max-w-sm p-4 sm:p-5 gap-3.5"
+        }`}>
           <div className="w-full flex justify-between items-center px-1">
             <div className="flex items-center gap-1.5">
               {currentPlayer.isOnline && (

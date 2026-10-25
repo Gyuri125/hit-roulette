@@ -160,9 +160,15 @@ const playFanfareTone = () => {
 
 interface RouletteWheelProps {
   onSpinEnd?: (selectedCategory: Category) => void;
+  tvMode?: boolean;
+  tvScale?: number;
 }
 
-export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
+export const RouletteWheel: React.FC<RouletteWheelProps> = ({
+  onSpinEnd,
+  tvMode = false,
+  tvScale = 100,
+}) => {
   const [categories, setCategories] = useState<Category[]>(CATEGORIES);
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -256,9 +262,29 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   };
 
   const getFontSize = () => {
-    if (numSlices <= 5) return { line1: 12, line2: 11, y1: 76, y2: 94 };
-    if (numSlices <= 8) return { line1: 10, line2: 9, y1: 72, y2: 86 };
-    return { line1: 8.5, line2: 7.5, y1: 68, y2: 80 };
+    const scaleMult = tvMode ? (tvScale ? tvScale / 100 : 1.25) : 1;
+    if (numSlices <= 5) {
+      return {
+        line1: Math.round(13.5 * scaleMult * 10) / 10,
+        line2: Math.round(12 * scaleMult * 10) / 10,
+        y1: tvMode ? 70 : 76,
+        y2: tvMode ? 90 : 94,
+      };
+    }
+    if (numSlices <= 8) {
+      return {
+        line1: Math.round(11 * scaleMult * 10) / 10,
+        line2: Math.round(10 * scaleMult * 10) / 10,
+        y1: tvMode ? 66 : 72,
+        y2: tvMode ? 84 : 86,
+      };
+    }
+    return {
+      line1: Math.round(9.5 * scaleMult * 10) / 10,
+      line2: Math.round(8.5 * scaleMult * 10) / 10,
+      y1: tvMode ? 64 : 68,
+      y2: tvMode ? 78 : 80,
+    };
   };
   const fontConfig = getFontSize();
 
@@ -316,7 +342,11 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
             fontSize={fontConfig.line1}
             fontWeight="900"
             textAnchor="middle"
-            className="uppercase tracking-wider font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
+            className="uppercase font-sans"
+            style={{
+              filter: "drop-shadow(0px 2px 4px rgba(0,0,0,1)) drop-shadow(0px 0px 3px rgba(0,0,0,0.95))",
+              letterSpacing: tvMode ? "0.06em" : "0.03em",
+            }}
           >
             {cat.lines[0]}
           </text>
@@ -328,7 +358,11 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
               fontSize={fontConfig.line2}
               fontWeight="900"
               textAnchor="middle"
-              className="uppercase tracking-wider font-sans drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] opacity-95"
+              className="uppercase font-sans opacity-95"
+              style={{
+                filter: "drop-shadow(0px 2px 4px rgba(0,0,0,1)) drop-shadow(0px 0px 3px rgba(0,0,0,0.95))",
+                letterSpacing: tvMode ? "0.06em" : "0.03em",
+              }}
             >
               {cat.lines[1]}
             </text>
@@ -346,10 +380,14 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpinEnd }) => {
   const discoColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
 
   return (
-    <div className="flex flex-col items-center gap-4 w-full max-w-md select-none">
+    <div className={`flex flex-col items-center gap-4 w-full select-none transition-all duration-300 ${tvMode ? "max-w-xl" : "max-w-md"}`}>
       <div
         onClick={spin}
-        className="relative w-72 h-72 sm:w-84 sm:h-84 lg:w-92 lg:h-92 flex items-center justify-center cursor-pointer group"
+        className={`relative flex items-center justify-center cursor-pointer group transition-all duration-300 ${
+          tvMode
+            ? "w-80 h-80 sm:w-96 sm:h-96 lg:w-[460px] lg:h-[460px] xl:w-[500px] xl:h-[500px]"
+            : "w-72 h-72 sm:w-84 sm:h-84 lg:w-92 lg:h-92"
+        }`}
         title="Kattints a kerékre a pörgetéshez!"
       >
         <div

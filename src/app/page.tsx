@@ -332,6 +332,39 @@ export default function Home() {
   // ⛶ 1-Kattintásos TV Fullscreen (Mozimód)
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
+  // 8. 16:9 TV-RE OPTIMALIZÁLT NÉZET ÉS MÉRETARÁNY (UI ZOOM SCALER)
+  const [isTvMode, setIsTvMode] = useState<boolean>(false);
+  const [tvScale, setTvScale] = useState<number>(120);
+  const [isScaleDropdownOpen, setIsScaleDropdownOpen] = useState<boolean>(false);
+
+  const toggleTvMode = () => {
+    setIsTvMode((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("hit_host_tv_mode", String(next));
+      }
+      return next;
+    });
+  };
+
+  const adjustScale = (delta: number) => {
+    setTvScale((prev) => {
+      const next = Math.max(90, Math.min(160, prev + delta));
+      if (typeof window !== "undefined") {
+        localStorage.setItem("hit_host_tv_scale", String(next));
+      }
+      return next;
+    });
+  };
+
+  const setSpecificScale = (scale: number) => {
+    setTvScale(scale);
+    setIsScaleDropdownOpen(false);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("hit_host_tv_scale", String(scale));
+    }
+  };
+
   useEffect(() => {
     const handleFsChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
@@ -546,6 +579,8 @@ export default function Home() {
     const hostPlayed = localStorage.getItem("hit_host_played_ids");
     const hostStats = localStorage.getItem("hit_host_session_stats");
     const hostStrict = localStorage.getItem("hit_host_strict_mode");
+    const hostTvMode = localStorage.getItem("hit_host_tv_mode");
+    const hostTvScale = localStorage.getItem("hit_host_tv_scale");
 
     if (hostRoom) setRoomCode(hostRoom);
     if (hostPlayers) {
@@ -563,6 +598,15 @@ export default function Home() {
     if (hostStrict !== null) {
       setStrictQuizMode(hostStrict === "true");
     }
+    if (hostTvMode !== null) {
+      setIsTvMode(hostTvMode === "true");
+    } else if (typeof window !== "undefined" && window.innerWidth >= 1200) {
+      setIsTvMode(true);
+    }
+    if (hostTvScale) {
+      const parsedScale = parseInt(hostTvScale, 10);
+      if (parsedScale >= 80 && parsedScale <= 170) setTvScale(parsedScale);
+    }
 
     hostHydratedRef.current = true;
   }, []);
@@ -575,7 +619,9 @@ export default function Home() {
     localStorage.setItem("hit_host_played_ids", JSON.stringify(playedIds));
     localStorage.setItem("hit_host_session_stats", JSON.stringify(sessionStats));
     localStorage.setItem("hit_host_strict_mode", String(strictQuizMode));
-  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isJoinedAsClient]);
+    localStorage.setItem("hit_host_tv_mode", String(isTvMode));
+    localStorage.setItem("hit_host_tv_scale", String(tvScale));
+  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isTvMode, tvScale, isJoinedAsClient]);
 
   // ================= FADE IN & FADE OUT MOTOR =================
   const stopFadeTimer = () => {
@@ -1394,6 +1440,9 @@ export default function Home() {
       } else if (e.code === "KeyF") {
         e.preventDefault();
         toggleFullscreen();
+      } else if (e.code === "KeyT") {
+        e.preventDefault();
+        toggleTvMode();
       }
     };
 
@@ -1828,7 +1877,12 @@ export default function Home() {
         </main>
       ) : (
         /* ==================== TV / LAPTOP FŐOLDAL ==================== */
-        <main className="min-h-[100dvh] bg-neutral-950 text-white flex flex-col items-center justify-between p-2.5 sm:p-5 select-none relative overflow-x-hidden">
+        <main
+          className={`min-h-[100dvh] bg-neutral-950 text-white flex flex-col items-center justify-between p-2.5 sm:p-5 select-none relative overflow-x-hidden transition-all duration-300 ${
+            isTvMode ? "w-full max-w-[1700px] mx-auto px-4 sm:px-8" : ""
+          }`}
+          style={isTvMode && tvScale !== 100 ? { zoom: `${tvScale}%` } : undefined}
+        >
           <div
             className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full blur-[150px] opacity-20 pointer-events-none transition-colors duration-700"
             style={{ backgroundColor: currentAccent }}
@@ -1858,7 +1912,9 @@ export default function Home() {
           </div>
 
           {/* FEJLÉC */}
-          <header className="w-full max-w-6xl flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10">
+          <header className={`w-full flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10 ${
+            isTvMode ? "max-w-[1600px]" : "max-w-6xl"
+          }`}>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg sm:text-2xl font-black tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-violet-500">
@@ -1967,6 +2023,72 @@ export default function Home() {
                 <span className="hidden md:inline">{isFullscreen ? "Ablakos" : "Teljes Képernyő"}</span>
               </button>
 
+              {/* 📺 16:9 TV-RE OPTIMALIZÁLT NAGYOBB NÉZET GOMB */}
+              <button
+                onClick={toggleTvMode}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition shadow-sm ${
+                  isTvMode
+                    ? "bg-gradient-to-r from-amber-500/25 to-emerald-500/20 border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.25)]"
+                    : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                }`}
+                title="16:9 TV-re optimalizált nagyobb nézet (T)"
+              >
+                <Tv className={`w-3.5 h-3.5 ${isTvMode ? "text-amber-400" : "text-neutral-400"}`} />
+                <span>16:9 TV</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${isTvMode ? "bg-amber-400 text-neutral-950" : "bg-neutral-800 text-neutral-400"}`}>
+                  {isTvMode ? "BE" : "KI"}
+                </span>
+              </button>
+
+              {/* 🔍 %-OS IKON ÉS MÉRET NÖVELŐ (UI ZOOM SCALER) */}
+              <div className="relative flex items-center bg-neutral-900 border border-neutral-800 rounded-2xl p-0.5 shadow-sm">
+                <button
+                  onClick={() => adjustScale(-10)}
+                  disabled={tvScale <= 90}
+                  className="px-2 py-1 text-xs font-black text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-30 rounded-xl transition"
+                  title="Kisebb nézet (-10%)"
+                >
+                  -
+                </button>
+
+                <button
+                  onClick={() => setIsScaleDropdownOpen((prev) => !prev)}
+                  className="px-2.5 py-1 text-xs font-black font-mono text-amber-400 hover:text-amber-300 transition flex items-center gap-1"
+                  title="Kattints a méretarány gyors beállításához"
+                >
+                  <span>{tvScale}%</span>
+                </button>
+
+                <button
+                  onClick={() => adjustScale(10)}
+                  disabled={tvScale >= 160}
+                  className="px-2 py-1 text-xs font-black text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-30 rounded-xl transition"
+                  title="Nagyobb nézet (+10%)"
+                >
+                  +
+                </button>
+
+                {isScaleDropdownOpen && (
+                  <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 z-50 bg-neutral-900/95 backdrop-blur-xl border-2 border-amber-500/40 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 min-w-[130px] animate-in fade-in zoom-in-95 duration-150">
+                    <div className="text-[10px] uppercase font-black text-amber-400 px-2 py-0.5 border-b border-neutral-800">
+                      TV Méretarány
+                    </div>
+                    {[100, 115, 125, 140, 155].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setSpecificScale(s)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold text-left transition flex items-center justify-between ${
+                          tvScale === s ? "bg-amber-500 text-neutral-950 font-black shadow" : "text-neutral-300 hover:bg-neutral-800"
+                        }`}
+                      >
+                        <span>{s}%</span>
+                        {s === 125 && <span className="text-[9px] opacity-75 font-normal">(Ajánlott TV)</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={handleCreateRoom}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-violet-600 to-rose-600 text-white text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition"
@@ -1992,6 +2114,7 @@ export default function Home() {
               <button
                 onClick={lockPinGate}
                 className="p-2 rounded-2xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-rose-400 hover:border-rose-500/40 text-xs font-bold transition shadow active:scale-95"
+                title="PIN Zárolás"
               >
                 <Lock className="w-3.5 h-3.5" />
               </button>
@@ -2022,7 +2145,9 @@ export default function Home() {
 
           {/* ÖSSZECSUKHATÓ SZŰRŐSÁV */}
           {showFilters && (
-            <div className="w-full max-w-6xl flex flex-col gap-2 py-2 px-3 bg-neutral-900/50 border border-neutral-800/80 rounded-2xl my-1.5 backdrop-blur-md z-10">
+            <div className={`w-full flex flex-col gap-2 py-2 px-3 bg-neutral-900/50 border border-neutral-800/80 rounded-2xl my-1.5 backdrop-blur-md z-10 ${
+              isTvMode ? "max-w-[1600px]" : "max-w-6xl"
+            }`}>
               <div className="w-full flex flex-wrap justify-between items-center gap-2 text-xs">
                 <div className="flex items-center gap-1 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800">
                   <Music2 className="w-3.5 h-3.5 text-amber-400 ml-1.5" />
@@ -2344,15 +2469,17 @@ export default function Home() {
                 onStartSpinAndMusic={() => remoteHandlersRef.current.spin()}
                 isPlayingMusic={isPlaying}
                 activeCategory={activeCategory}
+                tvMode={isTvMode}
+                tvScale={tvScale}
               />
             ) : (
-              <div className="w-full max-w-5xl flex flex-col items-center gap-6">
-                <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-center justify-items-center">
-                  <div className="flex flex-col items-center justify-center p-5 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full max-w-md shadow-2xl">
-                    <RouletteWheel onSpinEnd={handleSpinEnd} />
+              <div className={`w-full flex flex-col items-center gap-6 ${isTvMode ? "max-w-[1600px]" : "max-w-5xl"}`}>
+                <div className={`w-full grid grid-cols-1 ${isTvMode ? "xl:grid-cols-2 gap-10 xl:gap-14" : "lg:grid-cols-2 gap-6 lg:gap-8"} items-center justify-items-center`}>
+                  <div className={`flex flex-col items-center justify-center p-5 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full shadow-2xl ${isTvMode ? "max-w-xl" : "max-w-md"}`}>
+                    <RouletteWheel onSpinEnd={handleSpinEnd} tvMode={isTvMode} tvScale={tvScale} />
                   </div>
 
-                  <div className="flex flex-col items-center justify-center w-full max-w-sm">
+                  <div className={`flex flex-col items-center justify-center w-full ${isTvMode ? "max-w-md lg:max-w-lg" : "max-w-sm"}`}>
                     {filteredTracks.length > 0 ? (
                       <MusicCard
                         track={currentTrack}
@@ -2363,6 +2490,8 @@ export default function Home() {
                         onSeek={handleSeek}
                         isPlaying={isPlaying}
                         accentColor={currentAccent}
+                        tvMode={isTvMode}
+                        tvScale={tvScale}
                       />
                     ) : (
                       <div className="w-80 h-96 rounded-3xl border-2 border-dashed border-neutral-800 flex flex-col items-center justify-center p-6 text-center text-neutral-500 gap-3">

@@ -2,15 +2,13 @@
 
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Lock, ShieldAlert, KeyRound, ArrowRight } from "lucide-react";
+import { Lock, ShieldAlert, KeyRound, ArrowRight, Loader2 } from "lucide-react";
 
-const MASTER_PIN = "303646";
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
-const STORAGE_KEY = "hit_pin_auth_time";
+const STORAGE_TOKEN_KEY = "hit_pin_auth_token";
 
 export const lockPinGate = () => {
   if (typeof window !== "undefined") {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_TOKEN_KEY);
     window.dispatchEvent(new Event("pingate:lock"));
   }
 };
@@ -26,21 +24,35 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
   const [lockTimeLeft, setLockTimeLeft] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [shake, setShake] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
-  const checkValidity = () => {
+  // Munkamenet token ellenőrzése szerveroldalon
+  const checkValidity = async () => {
     if (typeof window === "undefined") return;
-    const authTimeStr = localStorage.getItem(STORAGE_KEY);
-    if (!authTimeStr) {
+    const token = localStorage.getItem(STORAGE_TOKEN_KEY);
+    if (!token) {
       setIsUnlocked(false);
       return;
     }
 
-    const authTime = parseInt(authTimeStr, 10);
-    if (Date.now() - authTime > FOUR_HOURS_MS) {
-      localStorage.removeItem(STORAGE_KEY);
-      setIsUnlocked(false);
-    } else {
-      setIsUnlocked(true);
+    try {
+      const res = await fetch(`/api/auth/pin?token=${encodeURIComponent(token)}`);
+      const data = await res.json();
+      if (res.ok && data?.valid) {
+        setIsUnlocked(true);
+      } else {
+        localStorage.removeItem(STORAGE_TOKEN_KEY);
+        setIsUnlocked(false);
+      }
+    } catch {
+      // Hálózati hiba esetén, ha a token formátuma érvényes és nincs lejárva
+      const parts = token.split(":");
+      const exp = parts[1] ? parseInt(parts[1], 10) : 0;
+      if (exp && Date.now() < exp) {
+        setIsUnlocked(true);
+      } else {
+        setIsUnlocked(false);
+      }
     }
   };
 
@@ -66,30 +78,51 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
     return () => clearInterval(timer);
   }, [lockTimeLeft]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (lockTimeLeft > 0) return;
+    if (lockTimeLeft > 0 || isVerifying || pinInput.length < 6) return;
 
-    if (pinInput.trim() === MASTER_PIN) {
-      localStorage.setItem(STORAGE_KEY, Date.now().toString());
-      setIsUnlocked(true);
-      setErrorMsg("");
-      setFailedAttempts(0);
-      setPinInput("");
-    } else {
-      const nextAttempts = failedAttempts + 1;
-      setFailedAttempts(nextAttempts);
-      const penaltySeconds = Math.pow(nextAttempts, 2);
-      setLockTimeLeft(penaltySeconds);
-      setErrorMsg(`Hibás PIN! Zárolva: ${penaltySeconds} másodpercre.`);
-      setPinInput("");
-      setShake(true);
-      setTimeout(() => setShake(false), 450);
+    setIsVerifying(true);
+    setErrorMsg("");
+
+    try {
+      const res = await fetch("/api/auth/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pinInput.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data?.success && data?.token) {
+        localStorage.setItem(STORAGE_TOKEN_KEY, data.token);
+        setIsUnlocked(true);
+        setErrorMsg("");
+        setFailedAttempts(0);
+        setPinInput("");
+      } else {
+        const nextAttempts = failedAttempts + 1;
+        setFailedAttempts(nextAttempts);
+        const penaltySeconds = Math.pow(nextAttempts, 2);
+        setLockTimeLeft(penaltySeconds);
+        setErrorMsg(data?.error || `Hibás PIN! Zárolva: ${penaltySeconds} másodpercre.`);
+        setPinInput("");
+        setShake(true);
+        setTimeout(() => setShake(false), 450);
+      }
+    } catch {
+      setErrorMsg("Hiba történt az azonosítás során! Kérlek próbáld újra.");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
   if (isUnlocked === null) {
-    return <div className="min-h-screen bg-neutral-950" />;
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
+      </div>
+    );
   }
 
   if (!isUnlocked) {
@@ -125,7 +158,7 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
                 type="password"
                 inputMode="numeric"
                 maxLength={6}
-                disabled={lockTimeLeft > 0}
+                disabled={lockTimeLeft > 0 || isVerifying}
                 placeholder="••••••"
                 value={pinInput}
                 onChange={(e) => {
@@ -159,16 +192,22 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
 
             <button
               type="submit"
-              disabled={lockTimeLeft > 0 || pinInput.length < 6}
+              disabled={lockTimeLeft > 0 || pinInput.length < 6 || isVerifying}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 disabled:from-neutral-800 disabled:to-neutral-800 disabled:text-neutral-500 text-neutral-950 font-black text-xs uppercase tracking-widest transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 active:scale-95"
             >
-              <span>{lockTimeLeft > 0 ? `Zárolva (${lockTimeLeft}s)` : "Belépés"}</span>
-              <ArrowRight className="w-4 h-4" />
+              {isVerifying ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <span>{lockTimeLeft > 0 ? `Zárolva (${lockTimeLeft}s)` : "Belépés"}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
 
           <div className="flex flex-col gap-0.5 text-[10px] text-neutral-500 font-mono pt-1 border-t border-neutral-800/80 w-full">
-            <span>🛡️ Anti-Brute-Force védelem aktív</span>
+            <span>🛡️ Szerveroldali Anti-Brute-Force védelem</span>
             <span>⏱️ 4 óra után automatikusan visszazár</span>
           </div>
         </motion.div>

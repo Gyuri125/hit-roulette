@@ -46,6 +46,8 @@ interface MusicCardProps {
   onSeek?: (time: number) => void;
   isPlaying?: boolean;
   accentColor?: string;
+  tvMode?: boolean;
+  tvScale?: number;
 }
 
 export const MusicCard: React.FC<MusicCardProps> = ({
@@ -57,6 +59,8 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   onSeek,
   isPlaying = false,
   accentColor = "#f59e0b",
+  tvMode = false,
+  tvScale = 100,
 }) => {
   const [showFrontLyrics, setShowFrontLyrics] = useState(true);
   const [eqBars, setEqBars] = useState<number[]>(Array(20).fill(15));
@@ -172,7 +176,11 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       onClick={onFlip}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      className="relative w-[310px] sm:w-[370px] h-[510px] sm:h-[580px] cursor-pointer select-none perspective-[1400px]"
+      className={`relative cursor-pointer select-none perspective-[1400px] transition-all duration-300 ${
+        tvMode
+          ? "w-[340px] sm:w-[410px] lg:w-[450px] xl:w-[480px] h-[550px] sm:h-[630px] lg:h-[670px] xl:h-[700px]"
+          : "w-[310px] sm:w-[370px] h-[510px] sm:h-[580px]"
+      }`}
     >
       {/* Basszusra lüktető neon aura a kártya mögött */}
       {isPlaying && (
@@ -276,7 +284,9 @@ export const MusicCard: React.FC<MusicCardProps> = ({
 
                   <div
                     ref={frontContainerRef}
-                    className="w-full h-56 sm:h-68 bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_12%,black_88%,transparent_100%)] flex flex-col gap-3 py-6"
+                    className={`w-full bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_12%,black_88%,transparent_100%)] flex flex-col gap-3.5 py-6 transition-all ${
+                      tvMode ? "h-64 sm:h-80 lg:h-92" : "h-56 sm:h-68"
+                    }`}
                   >
                     {parsedLyrics.map((line, idx) => {
                       const isActive = isSynced && idx === activeIndex;
@@ -290,10 +300,10 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                           }}
                           className={`text-center transition-all duration-300 font-bold leading-relaxed ${
                             isActive
-                              ? "text-amber-300 text-sm sm:text-base font-black scale-105 drop-shadow-[0_0_12px_rgba(251,191,36,0.9)] opacity-100 cursor-pointer"
+                              ? `${tvMode ? "text-base sm:text-xl" : "text-sm sm:text-base"} text-amber-300 font-black scale-105 drop-shadow-[0_0_15px_rgba(251,191,36,0.95)] opacity-100 cursor-pointer`
                               : isSynced
-                              ? "text-neutral-500 text-xs sm:text-sm opacity-40 hover:opacity-100 cursor-pointer"
-                              : "text-neutral-200 text-xs sm:text-sm opacity-90"
+                              ? `${tvMode ? "text-sm sm:text-base" : "text-xs sm:text-sm"} text-neutral-400 opacity-50 hover:opacity-100 cursor-pointer`
+                              : `${tvMode ? "text-sm sm:text-base" : "text-xs sm:text-sm"} text-neutral-200 opacity-90`
                           }`}
                         >
                           {line.text}
@@ -450,7 +460,9 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             </div>
 
             <div className="flex flex-col items-center gap-2 my-auto w-full z-10">
-              <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-2 border-neutral-700 shadow-2xl bg-neutral-950 flex items-center justify-center shrink-0">
+              <div className={`relative rounded-2xl overflow-hidden border-2 border-neutral-700 shadow-2xl bg-neutral-950 flex items-center justify-center shrink-0 transition-all ${
+                tvMode ? "w-28 h-28 sm:w-36 sm:h-36" : "w-24 h-24 sm:w-28 sm:h-28"
+              }`}>
                 {track.coverUrl ? (
                   <img src={track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
                 ) : (
@@ -473,7 +485,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <div className="flex items-center justify-center gap-2">
                     <Calendar className={`w-4 h-4 ${highlight === "year" || highlight === "all" ? "text-amber-400" : "text-neutral-500"}`} />
-                    <span className={`text-2xl sm:text-3xl font-black tracking-tight ${highlight === "year" || highlight === "all" ? "text-amber-300" : "text-white"}`}>
+                    <span className={`${tvMode ? "text-3xl sm:text-5xl" : "text-2xl sm:text-3xl"} font-black tracking-tight ${highlight === "year" || highlight === "all" ? "text-amber-300" : "text-white"}`}>
                       {track.year}
                     </span>
                   </div>
@@ -490,7 +502,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <Music className={`w-3.5 h-3.5 shrink-0 ${highlight === "title" || highlight === "all" ? "text-emerald-400" : "text-neutral-500"}`} />
-                    <h4 className={`text-xs sm:text-sm font-extrabold uppercase tracking-wide truncate ${highlight === "title" || highlight === "all" ? "text-emerald-300" : "text-white"}`}>
+                    <h4 className={`${tvMode ? "text-sm sm:text-base lg:text-lg" : "text-xs sm:text-sm"} font-extrabold uppercase tracking-wide truncate ${highlight === "title" || highlight === "all" ? "text-emerald-300" : "text-white"}`}>
                       {track.title}
                     </h4>
                   </div>
@@ -507,7 +519,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <Mic2 className={`w-3.5 h-3.5 shrink-0 ${highlight === "artist" || highlight === "all" ? "text-rose-400" : "text-neutral-500"}`} />
-                    <p className={`text-xs font-bold uppercase truncate ${highlight === "artist" || highlight === "all" ? "text-rose-300" : "text-neutral-300"}`}>
+                    <p className={`${tvMode ? "text-xs sm:text-sm lg:text-base" : "text-xs"} font-bold uppercase truncate ${highlight === "artist" || highlight === "all" ? "text-rose-300" : "text-neutral-300"}`}>
                       {track.artist}
                     </p>
                   </div>
