@@ -48,6 +48,7 @@ interface MusicCardProps {
   accentColor?: string;
   tvMode?: boolean;
   tvScale?: number;
+  customCardWidth?: number;
 }
 
 export const MusicCard: React.FC<MusicCardProps> = ({
@@ -61,6 +62,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   accentColor = "#f59e0b",
   tvMode = false,
   tvScale = 100,
+  customCardWidth,
 }) => {
   const [showFrontLyrics, setShowFrontLyrics] = useState(true);
   const [eqBars, setEqBars] = useState<number[]>(Array(20).fill(15));
@@ -171,16 +173,21 @@ export const MusicCard: React.FC<MusicCardProps> = ({
     setTilt({ rx: 0, ry: 0, gx: 50, gy: 50, active: false });
   };
 
-  return (
+    const isBigMode = tvMode || Boolean(customCardWidth && customCardWidth >= 440);
+
+    return (
     <div
       onClick={onFlip}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       className={`relative cursor-pointer select-none perspective-[1400px] transition-all duration-300 ${
-        tvMode
+        customCardWidth
+          ? ""
+          : tvMode
           ? "w-[340px] sm:w-[410px] lg:w-[450px] xl:w-[480px] h-[550px] sm:h-[630px] lg:h-[670px] xl:h-[700px]"
           : "w-[310px] sm:w-[370px] h-[510px] sm:h-[580px]"
       }`}
+      style={customCardWidth ? { width: `${customCardWidth}px`, height: `${Math.round(customCardWidth * 1.48)}px` } : undefined}
     >
       {/* Basszusra lüktető neon aura a kártya mögött */}
       {isPlaying && (
@@ -315,7 +322,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               ) : (
                 /* 💿 BAKELIT LEMEZJÁTSZÓ & FIZIKAILAG MOZGÓ LEMEZJÁTSZÓ-KAR (TONEARM) */
                 <div className="flex flex-col items-center gap-5 py-4 w-full">
-                  <div className="relative w-48 h-48 sm:w-52 sm:h-52 flex items-center justify-center">
+                  <div className={`relative ${isBigMode ? "w-56 h-56 sm:w-64 sm:h-64" : "w-48 h-48 sm:w-52 sm:h-52"} flex items-center justify-center`}>
                     {/* Háttérfény a lemez alatt */}
                     <div
                       className="absolute inset-2 rounded-full blur-2xl transition-opacity duration-500"
@@ -326,12 +333,12 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                     />
 
                     {/* Lemezjátszó alaplap keret */}
-                    <div className="relative w-44 h-44 sm:w-48 sm:h-48 rounded-full bg-neutral-950 border-4 border-neutral-800/90 flex items-center justify-center shadow-[0_15px_35px_rgba(0,0,0,0.9)]">
+                    <div className={`relative ${isBigMode ? "w-52 h-52 sm:w-60 sm:h-60" : "w-44 h-44 sm:w-48 sm:h-48"} rounded-full bg-neutral-950 border-4 border-neutral-800/90 flex items-center justify-center shadow-[0_15px_35px_rgba(0,0,0,0.9)]`}>
                       {/* Forgó bakelitlemez valósághű barázdákkal és fénytöréssel */}
                       <motion.div
                         animate={isPlaying ? { rotate: 360 } : {}}
                         transition={isPlaying ? { repeat: Infinity, duration: 3.5, ease: "linear" } : {}}
-                        className="relative w-40 h-40 sm:w-44 sm:h-44 rounded-full flex items-center justify-center overflow-hidden shadow-inner"
+                        className={`relative ${isBigMode ? "w-48 h-48 sm:w-54 sm:h-54" : "w-40 h-40 sm:w-44 sm:h-44"} rounded-full flex items-center justify-center overflow-hidden shadow-inner`}
                         style={{
                           background: `
                             conic-gradient(from 40deg, transparent 0deg, rgba(255,255,255,0.08) 45deg, transparent 90deg, transparent 180deg, rgba(255,255,255,0.08) 225deg, transparent 270deg),
@@ -341,7 +348,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                       >
                         {/* Középső színes bakelit címke */}
                         <div
-                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-full border-2 flex items-center justify-center shadow-md relative"
+                          className={`${isBigMode ? "w-16 h-16 sm:w-20 sm:h-20" : "w-14 h-14 sm:w-16 sm:h-16"} rounded-full border-2 flex items-center justify-center shadow-md relative`}
                           style={{
                             background: `radial-gradient(circle, ${accentColor} 0%, #171717 95%)`,
                             borderColor: `${accentColor}90`,
@@ -461,7 +468,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
 
             <div className="flex flex-col items-center gap-2 my-auto w-full z-10">
               <div className={`relative rounded-2xl overflow-hidden border-2 border-neutral-700 shadow-2xl bg-neutral-950 flex items-center justify-center shrink-0 transition-all ${
-                tvMode ? "w-28 h-28 sm:w-36 sm:h-36" : "w-24 h-24 sm:w-28 sm:h-28"
+                isBigMode ? "w-32 h-32 sm:w-40 sm:h-40" : "w-24 h-24 sm:w-28 sm:h-28"
               }`}>
                 {track.coverUrl ? (
                   <img src={track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
@@ -485,7 +492,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <div className="flex items-center justify-center gap-2">
                     <Calendar className={`w-4 h-4 ${highlight === "year" || highlight === "all" ? "text-amber-400" : "text-neutral-500"}`} />
-                    <span className={`${tvMode ? "text-3xl sm:text-5xl" : "text-2xl sm:text-3xl"} font-black tracking-tight ${highlight === "year" || highlight === "all" ? "text-amber-300" : "text-white"}`}>
+                    <span className={`${isBigMode ? "text-4xl sm:text-6xl" : "text-2xl sm:text-3xl"} font-black tracking-tight ${highlight === "year" || highlight === "all" ? "text-amber-300" : "text-white"}`}>
                       {track.year}
                     </span>
                   </div>
@@ -502,7 +509,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <Music className={`w-3.5 h-3.5 shrink-0 ${highlight === "title" || highlight === "all" ? "text-emerald-400" : "text-neutral-500"}`} />
-                    <h4 className={`${tvMode ? "text-sm sm:text-base lg:text-lg" : "text-xs sm:text-sm"} font-extrabold uppercase tracking-wide truncate ${highlight === "title" || highlight === "all" ? "text-emerald-300" : "text-white"}`}>
+                    <h4 className={`${isBigMode ? "text-base sm:text-lg lg:text-xl" : "text-xs sm:text-sm"} font-extrabold uppercase tracking-wide truncate ${highlight === "title" || highlight === "all" ? "text-emerald-300" : "text-white"}`}>
                       {track.title}
                     </h4>
                   </div>
@@ -519,7 +526,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <Mic2 className={`w-3.5 h-3.5 shrink-0 ${highlight === "artist" || highlight === "all" ? "text-rose-400" : "text-neutral-500"}`} />
-                    <p className={`${tvMode ? "text-xs sm:text-sm lg:text-base" : "text-xs"} font-bold uppercase truncate ${highlight === "artist" || highlight === "all" ? "text-rose-300" : "text-neutral-300"}`}>
+                    <p className={`${isBigMode ? "text-sm sm:text-base lg:text-lg" : "text-xs"} font-bold uppercase truncate ${highlight === "artist" || highlight === "all" ? "text-rose-300" : "text-neutral-300"}`}>
                       {track.artist}
                     </p>
                   </div>

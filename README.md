@@ -144,11 +144,17 @@ hit-roulette/
 
 ---
 
-## 📺 16:9 TV Nézet & Méretarány (UI Zoom)
+## 📺 16:9 TV Nézet, Húzható Elrendezés & Méretezés
 
-A Házigazda (TV) nézet fejlécében közvetlenül elérhető:
-- **📺 16:9 TV Mód (`T` gyorsbillentyű)**: Tágas, 16:9 arányú képernyőkre optimalizált elrendezés megnövelt méretű rulettkerékkel (akár 520px átmérő), vastagabb, nagyobb szeletfeliratokkal, valamint nagyméretű dalszöveg- és kártyakijelzővel.
-- **🔍 Méretarány (% Zoom)**: Közvetlen `[-]` és `[+]` gombokkal, illetve gyorsválasztó menüvel (100%, 115%, 125%, 140%, 155%) az egész felület mérete tetszőlegesen skálázható a kanapéról történő kényelmes olvasáshoz. A beállítás megmarad oldalfrissítés után is.
+A Házigazda (TV) nézet fejlécében és képernyőjén elérhető prémium testreszabási lehetőségek:
+- **📺 16:9 TV Mód (`T` gyorsbillentyű)**: Tágas, modern 16:9 elrendezés megnövelt méretű rulettkerékkel (akár 650px átmérőig), nagyméretű bakelitlemezjátszóval és kártyakijelzővel, teljes képernyős kitöltéssel a felesleges fekete sávok és rések nélkül.
+- **↔ Húzható Elválasztó (Draggable Gap Splitter)**: A rulettkerék és a zenei kártya közötti interaktív elválasztó sáv egérrel vagy érintéssel húzható balra/jobbra, valós időben szabályozva a két elem közti távolságot (8px-től 140px-ig).
+- **↕ Szélen Húzható Elemméretezés & Gyorsgombok**: A kerék bal szélén és a kártya jobb szélén lévő fogantyúkkal vagy a lebegő `[-]` / `[+]` gombokkal közvetlenül átméretezhető a kerék és a kártya.
+- **📐 Méret & Rés Menü**: 
+  - **Gyors Sablonok**: 🎬 *Mozi (Full TV)* (óriás elemek, feszes 24px hézag), 🎯 *Optimális (Kiegyensúlyozott)*, ⚡ *Kompakt*.
+  - **Finomhangoló Csúszkák**: Köztes rés, kerékátmérő és kártyaszélesség pixelpontos állítása automatikus `localStorage` mentéssel.
+- **🔍 Méretarány (% Zoom)**: Közvetlen `[-]` és `[+]` gombokkal, illetve gyorsválasztó menüvel (100%, 115%, 125%, 140%, 155%) az egész felület mérete tetszőlegesen skálázható a kanapéról történő kényelmes olvasáshoz.
+- **🎨 Kerék Stúdió PRO TV Nézet**: A feladványszerkesztő felugró ablak nagyképernyőn óriásira nyúlik (akár 1550px szélességben), 420px-es kristálytiszta élő előnézeti kerékkel, nagyobb betűkkel, kibővített csomagválasztóval és 1-kattintásos teljes képernyős nézettel.
 
 ---
 

@@ -47,6 +47,7 @@ import {
   Volume2,
   Maximize2,
   Minimize2,
+  MoveHorizontal,
   ShieldCheck,
   Plus,
   RefreshCw,
@@ -337,6 +338,12 @@ export default function Home() {
   const [tvScale, setTvScale] = useState<number>(120);
   const [isScaleDropdownOpen, setIsScaleDropdownOpen] = useState<boolean>(false);
 
+  // 📺 16:9 TV FINOMHANGOLHATÓ ELRENDEZÉS, HÉZAG ÉS ELEMMÉRETEK (DRAGGABLE & RESIZABLE)
+  const [tvWheelSize, setTvWheelSize] = useState<number>(530);
+  const [tvCardWidth, setTvCardWidth] = useState<number>(470);
+  const [tvGap, setTvGap] = useState<number>(28);
+  const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState<boolean>(false);
+
   const toggleTvMode = () => {
     setIsTvMode((prev) => {
       const next = !prev;
@@ -363,6 +370,128 @@ export default function Home() {
     if (typeof window !== "undefined") {
       localStorage.setItem("hit_host_tv_scale", String(scale));
     }
+  };
+
+  const saveTvLayout = (wheel: number, card: number, gap: number) => {
+    const safeWheel = Math.max(380, Math.min(650, wheel));
+    const safeCard = Math.max(360, Math.min(580, card));
+    const safeGap = Math.max(8, Math.min(160, gap));
+    setTvWheelSize(safeWheel);
+    setTvCardWidth(safeCard);
+    setTvGap(safeGap);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          "hit_tv_layout_prefs",
+          JSON.stringify({ wheelSize: safeWheel, cardWidth: safeCard, gap: safeGap })
+        );
+      } catch (_) {}
+    }
+  };
+
+  const applyLayoutPreset = (type: "cinema" | "balanced" | "compact") => {
+    if (type === "cinema") {
+      // 🎬 TV Mozi: Óriás elemek, feszes 24px hézag, teljes képernyőkitöltés
+      saveTvLayout(580, 510, 24);
+    } else if (type === "balanced") {
+      // 🎯 Kiegyensúlyozott
+      saveTvLayout(520, 460, 36);
+    } else if (type === "compact") {
+      // ⚡ Kompakt
+      saveTvLayout(450, 410, 20);
+    }
+  };
+
+  // ↔ KÖZTES HÉZAG (GAP) HÚZÁSA EGÉRREL / ÉRINTÉSSEL
+  const handleStartDragGap = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startGap = tvGap;
+    let currentGap = startGap;
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      const delta = moveEvt.clientX - startX;
+      currentGap = Math.max(8, Math.min(160, Math.round(startGap + delta)));
+      setTvGap(currentGap);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      saveTvLayout(tvWheelSize, tvCardWidth, currentGap);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const handleStartTouchDragGap = (e: React.TouchEvent) => {
+    if (!e.touches[0]) return;
+    const startX = e.touches[0].clientX;
+    const startGap = tvGap;
+    let currentGap = startGap;
+
+    const onTouchMove = (moveEvt: TouchEvent) => {
+      if (!moveEvt.touches[0]) return;
+      const delta = moveEvt.touches[0].clientX - startX;
+      currentGap = Math.max(8, Math.min(160, Math.round(startGap + delta)));
+      setTvGap(currentGap);
+    };
+
+    const onTouchEnd = () => {
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+      saveTvLayout(tvWheelSize, tvCardWidth, currentGap);
+    };
+
+    window.addEventListener("touchmove", onTouchMove);
+    window.addEventListener("touchend", onTouchEnd);
+  };
+
+  // 🎡 KERÉK MÉRETÉNEK HÚZÁSA SZÉLÉRŐL
+  const handleStartDragWheel = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWheel = tvWheelSize;
+    let currentWheel = startWheel;
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      const delta = startX - moveEvt.clientX; // balra húzva szélesedik kifelé a kerék
+      currentWheel = Math.max(380, Math.min(650, Math.round(startWheel + delta)));
+      setTvWheelSize(currentWheel);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      saveTvLayout(currentWheel, tvCardWidth, tvGap);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  // 🎴 KÁRTYA MÉRETÉNEK HÚZÁSA SZÉLÉRŐL
+  const handleStartDragCard = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startCard = tvCardWidth;
+    let currentCard = startCard;
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      const delta = moveEvt.clientX - startX; // jobbra húzva szélesedik kifelé a kártya
+      currentCard = Math.max(360, Math.min(580, Math.round(startCard + delta)));
+      setTvCardWidth(currentCard);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      saveTvLayout(tvWheelSize, currentCard, tvGap);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
   };
 
   useEffect(() => {
@@ -581,6 +710,16 @@ export default function Home() {
     const hostStrict = localStorage.getItem("hit_host_strict_mode");
     const hostTvMode = localStorage.getItem("hit_host_tv_mode");
     const hostTvScale = localStorage.getItem("hit_host_tv_scale");
+    const hostLayout = localStorage.getItem("hit_tv_layout_prefs");
+
+    if (hostLayout) {
+      try {
+        const parsed = JSON.parse(hostLayout);
+        if (parsed.wheelSize) setTvWheelSize(parsed.wheelSize);
+        if (parsed.cardWidth) setTvCardWidth(parsed.cardWidth);
+        if (parsed.gap !== undefined) setTvGap(parsed.gap);
+      } catch (_) {}
+    }
 
     if (hostRoom) setRoomCode(hostRoom);
     if (hostPlayers) {
@@ -621,7 +760,11 @@ export default function Home() {
     localStorage.setItem("hit_host_strict_mode", String(strictQuizMode));
     localStorage.setItem("hit_host_tv_mode", String(isTvMode));
     localStorage.setItem("hit_host_tv_scale", String(tvScale));
-  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isTvMode, tvScale, isJoinedAsClient]);
+    localStorage.setItem(
+      "hit_tv_layout_prefs",
+      JSON.stringify({ wheelSize: tvWheelSize, cardWidth: tvCardWidth, gap: tvGap })
+    );
+  }, [roomCode, players, playedIds, sessionStats, strictQuizMode, isTvMode, tvScale, tvWheelSize, tvCardWidth, tvGap, isJoinedAsClient]);
 
   // ================= FADE IN & FADE OUT MOTOR =================
   const stopFadeTimer = () => {
@@ -1879,7 +2022,7 @@ export default function Home() {
         /* ==================== TV / LAPTOP FŐOLDAL ==================== */
         <main
           className={`min-h-[100dvh] bg-neutral-950 text-white flex flex-col items-center justify-between p-2.5 sm:p-5 select-none relative overflow-x-hidden transition-all duration-300 ${
-            isTvMode ? "w-full max-w-[1700px] mx-auto px-4 sm:px-8" : ""
+            isTvMode ? "w-full max-w-[1920px] mx-auto px-3 sm:px-6" : ""
           }`}
           style={isTvMode && tvScale !== 100 ? { zoom: `${tvScale}%` } : undefined}
         >
@@ -1913,7 +2056,7 @@ export default function Home() {
 
           {/* FEJLÉC */}
           <header className={`w-full flex flex-wrap justify-between items-center py-2.5 border-b border-neutral-800/80 gap-2 z-10 ${
-            isTvMode ? "max-w-[1600px]" : "max-w-6xl"
+            isTvMode ? "max-w-[1900px]" : "max-w-6xl"
           }`}>
             <div>
               <div className="flex items-center gap-2">
@@ -2040,6 +2183,149 @@ export default function Home() {
                 </span>
               </button>
 
+              {/* 📐 TV ELRENDEZÉS, HÉZAG ÉS MÉRET BEÁLLÍTÓ MENÜ */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsLayoutMenuOpen((prev) => !prev)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition shadow-sm ${
+                    isLayoutMenuOpen
+                      ? "bg-amber-500/20 border-amber-400 text-amber-300"
+                      : "bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white"
+                  }`}
+                  title="TV méretarány, távolság és elemméretek finomhangolása"
+                >
+                  <MoveHorizontal className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Méret & Rés</span>
+                </button>
+
+                {isLayoutMenuOpen && (
+                  <div className="absolute top-full mt-2 right-0 z-50 bg-neutral-900/95 backdrop-blur-2xl border-2 border-amber-500/40 rounded-3xl p-4 shadow-[0_15px_50px_rgba(0,0,0,0.9)] flex flex-col gap-4 min-w-[290px] sm:min-w-[340px] animate-in fade-in zoom-in-95 duration-150 text-xs">
+                    <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <MoveHorizontal className="w-4 h-4 text-amber-400" />
+                        <span className="font-black uppercase tracking-wider text-white">TV Elrendezés & Méret</span>
+                      </div>
+                      <button
+                        onClick={() => setIsLayoutMenuOpen(false)}
+                        className="p-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* GYORS SABLONOK */}
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Gyors Sablonok:</span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          onClick={() => applyLayoutPreset("cinema")}
+                          className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-400 text-left transition flex flex-col group"
+                        >
+                          <strong className="text-amber-300 group-hover:text-amber-200 text-[11px] font-black truncate">🎬 Mozi (Full)</strong>
+                          <span className="text-[9px] text-neutral-500">Max méret, szűk rés</span>
+                        </button>
+                        <button
+                          onClick={() => applyLayoutPreset("balanced")}
+                          className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-400 text-left transition flex flex-col group"
+                        >
+                          <strong className="text-amber-300 group-hover:text-amber-200 text-[11px] font-black truncate">🎯 Optimális</strong>
+                          <span className="text-[9px] text-neutral-500">Kiegyensúlyozott</span>
+                        </button>
+                        <button
+                          onClick={() => applyLayoutPreset("compact")}
+                          className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-400 text-left transition flex flex-col group"
+                        >
+                          <strong className="text-amber-300 group-hover:text-amber-200 text-[11px] font-black truncate">⚡ Kompakt</strong>
+                          <span className="text-[9px] text-neutral-500">Kisebb méret</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* FINOMHANGOLÓ CSÚSZKÁK */}
+                    <div className="flex flex-col gap-3 pt-2 border-t border-neutral-800/80">
+                      {/* 1. HÉZAG / TÁVOLSÁG */}
+                      <div className="flex flex-col gap-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-neutral-300 font-bold">Köztes Hézag (Rés):</span>
+                          <span className="font-mono font-bold text-amber-400">{tvGap} px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="8"
+                          max="140"
+                          step="4"
+                          value={tvGap}
+                          onChange={(e) => saveTvLayout(tvWheelSize, tvCardWidth, Number(e.target.value))}
+                          className="w-full accent-amber-400 cursor-pointer h-1.5 bg-neutral-800 rounded-lg"
+                        />
+                        <div className="flex justify-between text-[9px] text-neutral-500">
+                          <span>8px (Feszes rés)</span>
+                          <span>140px (Tágas)</span>
+                        </div>
+                      </div>
+
+                      {/* 2. KERÉK MÉRETE */}
+                      <div className="flex flex-col gap-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-neutral-300 font-bold">Szerencsekerék Mérete:</span>
+                          <span className="font-mono font-bold text-amber-400">{tvWheelSize} px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="400"
+                          max="640"
+                          step="10"
+                          value={tvWheelSize}
+                          onChange={(e) => saveTvLayout(Number(e.target.value), tvCardWidth, tvGap)}
+                          className="w-full accent-amber-400 cursor-pointer h-1.5 bg-neutral-800 rounded-lg"
+                        />
+                        <div className="flex justify-between text-[9px] text-neutral-500">
+                          <span>400px</span>
+                          <span>640px (Óriás)</span>
+                        </div>
+                      </div>
+
+                      {/* 3. KÁRTYA SZÉLESSÉGE */}
+                      <div className="flex flex-col gap-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-neutral-300 font-bold">Zenei Kártya Szélessége:</span>
+                          <span className="font-mono font-bold text-amber-400">{tvCardWidth} px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="380"
+                          max="560"
+                          step="10"
+                          value={tvCardWidth}
+                          onChange={(e) => saveTvLayout(tvWheelSize, Number(e.target.value), tvGap)}
+                          className="w-full accent-amber-400 cursor-pointer h-1.5 bg-neutral-800 rounded-lg"
+                        />
+                        <div className="flex justify-between text-[9px] text-neutral-500">
+                          <span>380px</span>
+                          <span>560px (Óriás)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-neutral-800 flex justify-between items-center">
+                      <button
+                        onClick={() => applyLayoutPreset("cinema")}
+                        className="text-[10px] text-neutral-400 hover:text-amber-300 flex items-center gap-1 transition"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Alaphelyzet (Mozi TV)</span>
+                      </button>
+                      <button
+                        onClick={() => setIsLayoutMenuOpen(false)}
+                        className="px-3.5 py-1 rounded-xl bg-amber-500 text-neutral-950 font-black text-xs hover:bg-amber-400 transition"
+                      >
+                        Kész
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* 🔍 %-OS IKON ÉS MÉRET NÖVELŐ (UI ZOOM SCALER) */}
               <div className="relative flex items-center bg-neutral-900 border border-neutral-800 rounded-2xl p-0.5 shadow-sm">
                 <button
@@ -2146,7 +2432,7 @@ export default function Home() {
           {/* ÖSSZECSUKHATÓ SZŰRŐSÁV */}
           {showFilters && (
             <div className={`w-full flex flex-col gap-2 py-2 px-3 bg-neutral-900/50 border border-neutral-800/80 rounded-2xl my-1.5 backdrop-blur-md z-10 ${
-              isTvMode ? "max-w-[1600px]" : "max-w-6xl"
+              isTvMode ? "max-w-[1900px]" : "max-w-6xl"
             }`}>
               <div className="w-full flex flex-wrap justify-between items-center gap-2 text-xs">
                 <div className="flex items-center gap-1 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800">
@@ -2473,13 +2759,109 @@ export default function Home() {
                 tvScale={tvScale}
               />
             ) : (
-              <div className={`w-full flex flex-col items-center gap-6 ${isTvMode ? "max-w-[1600px]" : "max-w-5xl"}`}>
-                <div className={`w-full grid grid-cols-1 ${isTvMode ? "xl:grid-cols-2 gap-10 xl:gap-14" : "lg:grid-cols-2 gap-6 lg:gap-8"} items-center justify-items-center`}>
-                  <div className={`flex flex-col items-center justify-center p-5 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md w-full shadow-2xl ${isTvMode ? "max-w-xl" : "max-w-md"}`}>
-                    <RouletteWheel onSpinEnd={handleSpinEnd} tvMode={isTvMode} tvScale={tvScale} />
+              <div className={`w-full flex flex-col items-center gap-6 ${isTvMode ? "max-w-[1900px]" : "max-w-5xl"}`}>
+                <div
+                  className={`w-full ${
+                    isTvMode
+                      ? "flex flex-col xl:flex-row items-center justify-center relative"
+                      : "grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-center justify-items-center"
+                  }`}
+                  style={isTvMode ? { gap: `${tvGap}px` } : undefined}
+                >
+                  {/* BAL OLDAL: SZERENCSEKERÉK PANEL */}
+                  <div
+                    className={`relative flex flex-col items-center justify-center p-5 rounded-3xl bg-neutral-900/40 border border-neutral-800/60 backdrop-blur-md shadow-2xl transition-all duration-200 group ${
+                      isTvMode ? "" : "w-full max-w-md"
+                    }`}
+                    style={isTvMode ? { width: `${tvWheelSize + 50}px`, maxWidth: "100%" } : undefined}
+                  >
+                    {/* BAL OLDALI HÚZHATÓ ÁTMÉRETEZŐ ÉS GYORSGOMBOK */}
+                    {isTvMode && (
+                      <div
+                        className="hidden xl:flex absolute -left-3 top-1/2 -translate-y-1/2 flex-col items-center justify-center py-4 px-1 group cursor-ew-resize select-none z-30"
+                        title="Húzd balra/jobbra a kerék méretének állításához!"
+                        onMouseDown={handleStartDragWheel}
+                      >
+                        <div className="w-1.5 h-28 rounded-full bg-neutral-800 group-hover:bg-amber-400 group-hover:shadow-[0_0_12px_rgba(251,191,36,0.9)] transition-all" />
+                        <div className="absolute opacity-0 group-hover:opacity-100 transition-all pointer-events-auto -left-16 flex items-center gap-1 bg-neutral-900/95 border border-neutral-700 px-2 py-0.5 rounded-full shadow-2xl text-[10px] font-mono text-amber-300">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTvLayout(Math.max(380, tvWheelSize - 20), tvCardWidth, tvGap);
+                            }}
+                            className="hover:text-white px-1"
+                          >
+                            -
+                          </button>
+                          <span>{tvWheelSize}px</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTvLayout(Math.min(650, tvWheelSize + 20), tvCardWidth, tvGap);
+                            }}
+                            className="hover:text-white px-1"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <RouletteWheel
+                      onSpinEnd={handleSpinEnd}
+                      tvMode={isTvMode}
+                      tvScale={tvScale}
+                      customWheelSize={isTvMode ? tvWheelSize : undefined}
+                    />
                   </div>
 
-                  <div className={`flex flex-col items-center justify-center w-full ${isTvMode ? "max-w-md lg:max-w-lg" : "max-w-sm"}`}>
+                  {/* KÖZTES INTERAKTÍV HÚZHATÓ ELVÁLASZTÓ (DRAGGABLE RESIZER & GAP ADJUSTER) */}
+                  {isTvMode && (
+                    <div
+                      className="hidden xl:flex flex-col items-center justify-center relative select-none py-8 px-2 group cursor-col-resize z-20 shrink-0"
+                      title="Húzd az elemek közti távolság (rés) állításához!"
+                      onMouseDown={handleStartDragGap}
+                      onTouchStart={handleStartTouchDragGap}
+                    >
+                      <div className="w-1.5 h-44 rounded-full bg-neutral-800/80 group-hover:bg-amber-400 group-hover:shadow-[0_0_15px_rgba(251,191,36,0.9)] transition-all duration-200" />
+                      <div className="absolute top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-neutral-900 border-2 border-neutral-700 group-hover:border-amber-400 group-hover:scale-115 flex items-center justify-center shadow-2xl text-neutral-400 group-hover:text-amber-300 transition-all">
+                        <MoveHorizontal className="w-4 h-4" />
+                      </div>
+
+                      {/* Mini lebegő vezérlő hover esetén */}
+                      <div className="absolute -bottom-7 opacity-0 group-hover:opacity-100 transition-all pointer-events-auto flex items-center gap-1.5 bg-neutral-900/95 border border-neutral-700 px-2.5 py-0.5 rounded-full shadow-2xl text-[10px] font-mono whitespace-nowrap text-amber-300">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            saveTvLayout(tvWheelSize, tvCardWidth, Math.max(8, tvGap - 8));
+                          }}
+                          className="hover:text-white px-1 font-bold"
+                          title="Hézag csökkentése (-8px)"
+                        >
+                          -
+                        </button>
+                        <span>Hézag: {tvGap}px</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            saveTvLayout(tvWheelSize, tvCardWidth, Math.min(160, tvGap + 8));
+                          }}
+                          className="hover:text-white px-1 font-bold"
+                          title="Hézag növelése (+8px)"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* JOBB OLDAL: ZENEI KÁRTYA */}
+                  <div
+                    className={`relative flex flex-col items-center justify-center group ${
+                      isTvMode ? "" : "w-full max-w-sm"
+                    }`}
+                    style={isTvMode ? { width: `${tvCardWidth}px`, maxWidth: "100%" } : undefined}
+                  >
                     {filteredTracks.length > 0 ? (
                       <MusicCard
                         track={currentTrack}
@@ -2492,11 +2874,44 @@ export default function Home() {
                         accentColor={currentAccent}
                         tvMode={isTvMode}
                         tvScale={tvScale}
+                        customCardWidth={isTvMode ? tvCardWidth : undefined}
                       />
                     ) : (
                       <div className="w-80 h-96 rounded-3xl border-2 border-dashed border-neutral-800 flex flex-col items-center justify-center p-6 text-center text-neutral-500 gap-3">
                         <CalendarRange className="w-12 h-12 text-neutral-700" />
                         <p className="text-sm font-bold text-neutral-300">Nincs dal ebben a szűrésben!</p>
+                      </div>
+                    )}
+
+                    {/* JOBB OLDALI HÚZHATÓ ÁTMÉRETEZŐ ÉS GYORSGOMBOK */}
+                    {isTvMode && (
+                      <div
+                        className="hidden xl:flex absolute -right-3 top-1/2 -translate-y-1/2 flex-col items-center justify-center py-4 px-1 group cursor-ew-resize select-none z-30"
+                        title="Húzd balra/jobbra a kártya méretének állításához!"
+                        onMouseDown={handleStartDragCard}
+                      >
+                        <div className="w-1.5 h-28 rounded-full bg-neutral-800 group-hover:bg-amber-400 group-hover:shadow-[0_0_12px_rgba(251,191,36,0.9)] transition-all" />
+                        <div className="absolute opacity-0 group-hover:opacity-100 transition-all pointer-events-auto -right-16 flex items-center gap-1 bg-neutral-900/95 border border-neutral-700 px-2 py-0.5 rounded-full shadow-2xl text-[10px] font-mono text-amber-300">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTvLayout(tvWheelSize, Math.max(360, tvCardWidth - 20), tvGap);
+                            }}
+                            className="hover:text-white px-1"
+                          >
+                            -
+                          </button>
+                          <span>{tvCardWidth}px</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTvLayout(tvWheelSize, Math.min(580, tvCardWidth + 20), tvGap);
+                            }}
+                            className="hover:text-white px-1"
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

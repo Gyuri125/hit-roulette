@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette } from "lucide-react";
+import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette, Maximize2, Minimize2 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { getSharedAudioContext } from "./PlayerBoard";
 
@@ -162,18 +162,21 @@ interface RouletteWheelProps {
   onSpinEnd?: (selectedCategory: Category) => void;
   tvMode?: boolean;
   tvScale?: number;
+  customWheelSize?: number;
 }
 
 export const RouletteWheel: React.FC<RouletteWheelProps> = ({
   onSpinEnd,
   tvMode = false,
   tvScale = 100,
+  customWheelSize,
 }) => {
   const [categories, setCategories] = useState<Category[]>(CATEGORIES);
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [winner, setWinner] = useState<Category | null>(null);
   const [discoStep, setDiscoStep] = useState(0);
+  const [isStudioMaximized, setIsStudioMaximized] = useState(false);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -380,14 +383,20 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
   const discoColors = ["#f59e0b", "#10b981", "#ec4899", "#8b5cf6", "#06b6d4"];
 
   return (
-    <div className={`flex flex-col items-center gap-4 w-full select-none transition-all duration-300 ${tvMode ? "max-w-xl" : "max-w-md"}`}>
+    <div
+      className={`flex flex-col items-center gap-4 w-full select-none transition-all duration-300 ${tvMode ? "max-w-xl" : "max-w-md"}`}
+      style={customWheelSize ? { maxWidth: `${customWheelSize + 80}px` } : undefined}
+    >
       <div
         onClick={spin}
         className={`relative flex items-center justify-center cursor-pointer group transition-all duration-300 ${
-          tvMode
+          customWheelSize
+            ? ""
+            : tvMode
             ? "w-80 h-80 sm:w-96 sm:h-96 lg:w-[460px] lg:h-[460px] xl:w-[500px] xl:h-[500px]"
             : "w-72 h-72 sm:w-84 sm:h-84 lg:w-92 lg:h-92"
         }`}
+        style={customWheelSize ? { width: `${customWheelSize}px`, height: `${customWheelSize}px` } : undefined}
         title="Kattints a kerékre a pörgetéshez!"
       >
         <div
@@ -502,100 +511,126 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         createPortal(
           <AnimatePresence>
             {isEditorOpen && (
-              <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md overflow-y-auto">
+              <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/92 backdrop-blur-xl overflow-y-auto">
                 <motion.div
                   initial={{ scale: 0.95, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.95, opacity: 0 }}
-                  className="w-full max-w-4xl bg-neutral-900 border-2 border-neutral-800 rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col gap-5 my-auto max-h-[92vh] overflow-y-auto"
+                  className={`w-full bg-neutral-900/95 border-2 border-amber-500/40 rounded-[32px] p-4 sm:p-6 md:p-8 shadow-[0_0_80px_rgba(245,158,11,0.2)] flex flex-col gap-6 my-auto max-h-[95vh] overflow-y-auto transition-all duration-300 ${
+                    isStudioMaximized || tvMode ? "max-w-[1550px] w-[95vw]" : "max-w-5xl"
+                  }`}
                 >
-                  <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
-                    <div className="flex items-center gap-2.5">
-                      <Settings2 className="w-5 h-5 text-amber-400" />
+                  <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400">
+                        <Settings2 className="w-6 h-6" />
+                      </div>
                       <div>
-                        <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-wider">
-                          Kerék Stúdió & Feladvány-kezelő
+                        <h3 className="text-lg sm:text-2xl font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <span>Kerék Stúdió & Feladvány-kezelő</span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            PRO TV NÉZET
+                          </span>
                         </h3>
-                        <p className="text-[11px] text-neutral-400">
-                          Szerkeszd a feladványokat és figyeld az élő előnézetet!
+                        <p className="text-xs sm:text-sm text-neutral-400">
+                          Szerkeszd a feladványokat és figyeld az élő óriás előnézetet valós időben!
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setIsEditorOpen(false)}
-                      className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
+                    
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setIsStudioMaximized((prev) => !prev)}
+                        className="p-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white transition"
+                        title={isStudioMaximized ? "Normál méret" : "Teljes stúdió kiterjesztés"}
+                      >
+                        {isStudioMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                      </button>
+                      <button
+                        onClick={() => setIsEditorOpen(false)}
+                        className="p-2.5 rounded-2xl bg-neutral-800 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-300 transition"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex flex-col md:flex-row items-stretch gap-6">
-                    <div className="w-full md:w-[260px] shrink-0 flex flex-col items-center justify-center p-4 rounded-2xl bg-neutral-950 border border-neutral-800/80 shadow-inner">
-                      <div className="flex items-center justify-between w-full mb-2 px-1">
-                        <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5" /> Élő Előnézet
+                  <div className="flex flex-col lg:flex-row items-stretch gap-6 lg:gap-8">
+                    {/* BAL OLDAL: ÓRIÁS ÉLŐ ELŐNÉZET KERÉK */}
+                    <div className="w-full lg:w-[420px] xl:w-[480px] shrink-0 flex flex-col items-center justify-between p-5 rounded-3xl bg-neutral-950 border border-neutral-800/80 shadow-2xl">
+                      <div className="flex items-center justify-between w-full mb-3 px-2">
+                        <span className="text-xs sm:text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4" /> Élő Óriás Előnézet
                         </span>
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-300">
+                        <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-200">
                           {categories.length} szelet
                         </span>
                       </div>
 
-                      <div className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-full p-2 bg-neutral-900 border-4 border-neutral-800 shadow-2xl my-2 shrink-0">
-                        <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-20 w-0 h-0 border-l-[9px] border-l-transparent border-r-[9px] border-r-transparent border-t-[16px] border-t-amber-400" />
+                      <div className="relative w-64 h-64 sm:w-80 sm:h-80 lg:w-[360px] lg:h-[360px] xl:w-[420px] xl:h-[420px] rounded-full p-2.5 bg-neutral-900 border-4 border-neutral-800 shadow-[0_0_50px_rgba(0,0,0,0.85)] my-auto shrink-0 flex items-center justify-center">
+                        <div className="absolute -top-3.5 left-1/2 transform -translate-x-1/2 z-20 w-0 h-0 border-l-[11px] border-l-transparent border-r-[11px] border-r-transparent border-t-[20px] border-t-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]" />
                         <div className="w-full h-full rounded-full overflow-hidden">
                           {renderWheelSvg(true)}
                         </div>
                       </div>
+
+                      <p className="text-[11px] sm:text-xs text-neutral-500 text-center mt-3 font-medium">
+                        A feladványok azonnal megjelennek a TV képernyőn is mentés után.
+                      </p>
                     </div>
 
-                    <div className="flex-1 flex flex-col gap-4 min-w-0">
-                      <div className="flex flex-col gap-1.5">
-                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
-                          <Layers className="w-3 h-3 text-amber-400" /> Kész Csomagok
+                    {/* JOBB OLDAL: CSOMAGOK, HOZZÁADÁS ÉS FELADVÁNYLISTA */}
+                    <div className="flex-1 flex flex-col gap-5 min-w-0">
+                      <div className="flex flex-col gap-2">
+                        <span className="text-xs font-black text-neutral-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Layers className="w-4 h-4 text-amber-400" /> Kész Játékcsomagok (1-kattintásos váltás)
                         </span>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                           {Object.entries(CHALLENGE_PRESETS).map(([key, pack]) => (
                             <button
                               key={key}
                               onClick={() => setCategories(pack.categories)}
-                              className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-400/50 hover:bg-neutral-800/40 text-left transition flex flex-col"
+                              className="p-3 sm:p-3.5 rounded-2xl bg-neutral-950 border border-neutral-800 hover:border-amber-400/60 hover:bg-neutral-800/40 text-left transition flex flex-col gap-0.5 group"
                             >
-                              <strong className="text-amber-300 font-bold text-xs truncate w-full">{pack.name}</strong>
-                              <span className="text-[10px] text-neutral-500">{pack.categories.length} feladvány</span>
+                              <strong className="text-amber-300 group-hover:text-amber-200 font-extrabold text-xs sm:text-sm truncate w-full">
+                                {pack.name}
+                              </strong>
+                              <span className="text-[11px] text-neutral-400">{pack.categories.length} feladvány szelet</span>
                             </button>
                           ))}
                         </div>
                       </div>
 
-                      <form onSubmit={handleAddCustomCategory} className="flex flex-col gap-2.5 bg-neutral-950 p-3 rounded-2xl border border-neutral-800">
-                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
-                          <Plus className="w-3 h-3 text-amber-400" /> Saját Feladvány Hozzáadása
+                      {/* SAJÁT FELADVÁNY ŰRLAP */}
+                      <form onSubmit={handleAddCustomCategory} className="flex flex-col gap-3 bg-neutral-950 p-4 sm:p-5 rounded-2xl border border-neutral-800/90 shadow-inner">
+                        <span className="text-xs font-black text-neutral-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Plus className="w-4 h-4 text-amber-400" /> Saját Feladvány Hozzáadása
                         </span>
                         
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <input
                             type="text"
-                            placeholder="Feladvány neve (pl. 2000 Után?)"
+                            placeholder="Feladvány neve (pl. 2000 Után? vagy Dupla Évszám)"
                             value={newLabel}
                             onChange={(e) => setNewLabel(e.target.value)}
-                            className="bg-neutral-900 text-xs px-3 py-2 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400"
+                            className="bg-neutral-900 text-xs sm:text-sm px-4 py-2.5 sm:py-3 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400 transition"
                           />
                           <input
                             type="text"
-                            placeholder="Szabály / Pontozási leírás"
+                            placeholder="Szabály / Pontozási leírás (pl. +1 X ha helyes)"
                             value={newDesc}
                             onChange={(e) => setNewDesc(e.target.value)}
-                            className="bg-neutral-900 text-xs px-3 py-2 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400"
+                            className="bg-neutral-900 text-xs sm:text-sm px-4 py-2.5 sm:py-3 rounded-xl text-white border border-neutral-800 focus:outline-none focus:border-amber-400 transition"
                           />
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-neutral-800/60">
-                          <div className="flex items-center gap-1.5 text-[11px]">
-                            <span className="text-neutral-500 font-bold">Kártya:</span>
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-neutral-800/60">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-neutral-400 font-bold">Kártya Cél:</span>
                             <select
                               value={newTargetType}
                               onChange={(e) => setNewTargetType(e.target.value as TargetHighlight)}
-                              className="bg-neutral-900 text-xs text-white border border-neutral-800 rounded-lg px-2 py-1 focus:outline-none"
+                              className="bg-neutral-900 text-xs sm:text-sm text-white border border-neutral-800 rounded-xl px-3 py-1.5 focus:outline-none focus:border-amber-400"
                             >
                               <option value="year">📅 Évszám</option>
                               <option value="title">🎵 Dalcím</option>
@@ -604,81 +639,86 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
                             </select>
                           </div>
 
-                          <div className="flex items-center gap-1">
-                            <Palette className="w-3.5 h-3.5 text-neutral-500 mr-0.5" />
+                          <div className="flex items-center gap-1.5">
+                            <Palette className="w-4 h-4 text-neutral-400 mr-1" />
                             {COLOR_PRESETS.map((p, idx) => (
                               <button
                                 key={p.label}
                                 type="button"
                                 onClick={() => setSelectedColorIdx(idx)}
-                                className={`w-4 h-4 rounded-full transition transform ${
-                                  selectedColorIdx === idx ? "scale-125 ring-2 ring-white" : "opacity-70 hover:opacity-100"
+                                className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full transition transform ${
+                                  selectedColorIdx === idx ? "scale-125 ring-2 ring-white shadow-lg" : "opacity-75 hover:opacity-100"
                                 }`}
                                 style={{ backgroundColor: p.accent }}
+                                title={p.label}
                               />
                             ))}
                           </div>
 
                           <button
                             type="submit"
-                            className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs flex items-center gap-1 transition shadow ml-auto"
+                            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-neutral-950 font-black text-xs sm:text-sm flex items-center gap-1.5 transition shadow-lg ml-auto active:scale-95"
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            <Plus className="w-4 h-4" />
                             <span>Beszúrás</span>
                           </button>
                         </div>
                       </form>
 
-                      <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
+                      {/* FELADVÁNYOK TÁBLÁZATA / LISTÁJA */}
+                      <div className="flex flex-col gap-2 max-h-56 sm:max-h-72 lg:max-h-84 overflow-y-auto pr-1">
                         {categories.map((cat, idx) => (
                           <div
                             key={`${cat.id}-${idx}`}
-                            className="flex items-center justify-between p-2 rounded-xl bg-neutral-950 border border-neutral-800/80 text-xs"
+                            className="flex items-center justify-between p-3 rounded-2xl bg-neutral-950/90 border border-neutral-800/80 hover:border-neutral-700 text-xs sm:text-sm transition"
                           >
-                            <div className="flex items-center gap-2 truncate">
-                              <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.accent }} />
+                            <div className="flex items-center gap-3 truncate">
+                              <div className="w-4 h-4 rounded-full shrink-0 shadow-md" style={{ backgroundColor: cat.accent }} />
                               <div className="flex flex-col truncate">
-                                <span className="font-bold text-white uppercase truncate">{cat.label}</span>
-                                <span className="text-[10px] text-neutral-500 truncate">{cat.desc}</span>
+                                <span className="font-extrabold text-white uppercase truncate text-xs sm:text-sm">{cat.label}</span>
+                                <span className="text-[11px] text-neutral-400 truncate">{cat.desc}</span>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <div className="flex items-center gap-1.5 shrink-0 ml-3">
                               <button
                                 onClick={() => {
                                   if (categories.length >= 14) return alert("Maximum 14 szelet engedélyezett!");
                                   setCategories((prev) => [...prev, { ...cat, id: `${cat.id}-${Date.now()}` }]);
                                 }}
-                                className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-amber-300 transition"
+                                className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-amber-300 transition"
+                                title="Másolás"
                               >
-                                <Copy className="w-3 h-3" />
+                                <Copy className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 onClick={() => {
                                   if (categories.length <= 2) return alert("Legalább 2 szeletnek maradnia kell!");
                                   setCategories((prev) => prev.filter((_, i) => i !== idx));
                                 }}
-                                className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-rose-400 transition"
+                                className="p-2 rounded-xl bg-neutral-900 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-400 transition"
+                                title="Törlés"
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </div>
                         ))}
                       </div>
 
-                      <div className="flex justify-between items-center pt-2 border-t border-neutral-800 text-xs mt-auto">
+                      {/* LÁBLÉC: MENTÉS ÉS VISSZAÁLLÍTÁS */}
+                      <div className="flex justify-between items-center pt-3 border-t border-neutral-800 text-xs sm:text-sm mt-auto">
                         <button
                           onClick={() => setCategories(CATEGORIES)}
-                          className="text-neutral-500 hover:text-amber-400 flex items-center gap-1 transition"
+                          className="text-neutral-400 hover:text-amber-400 flex items-center gap-1.5 font-bold transition py-2 px-3 rounded-xl hover:bg-neutral-800/60"
                         >
-                          <RotateCcw className="w-3 h-3" />
+                          <RotateCcw className="w-4 h-4" />
                           <span>Alapértelmezett (5 Szín)</span>
                         </button>
 
                         <button
                           onClick={() => setIsEditorOpen(false)}
-                          className="px-6 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black transition"
+                          className="px-8 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-neutral-950 font-black text-sm sm:text-base shadow-2xl hover:scale-105 active:scale-95 transition"
                         >
                           Kész (Mentés)
                         </button>

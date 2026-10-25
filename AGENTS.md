@@ -148,8 +148,11 @@ Host and players communicate on channel `room_${roomCode}` using broadcast event
 - Custom `fadeIn` and `fadeOut` volume timers using 30ms interval steps (over 1500–1800ms) prevent popping and harsh cutoffs.
 - Shared Web Audio context (`getSharedAudioContext`) handles all custom oscillators.
 
-### 5. 16:9 TV Mode & UI Zoom Scaler
-- `isTvMode`: Expands host layout for wide screens (`max-w-[1700px]`), increases roulette wheel size up to 520px, scales up slice typography and karaoke lyrics.
+### 5. 16:9 TV Mode, Layout Sizing & Pro Kerék Stúdió
+- `isTvMode`: Expands host layout for wide screens (`max-w-[1920px]`), increases roulette wheel size (400px–650px), expands card and vinyl player, eliminates dead central gap.
+- **Draggable Gap Splitter & Edge Resizers**: Interactive middle divider (`MoveHorizontal`) and outer edge handles to drag-to-resize gap (8px–140px), wheel size, and card width in real-time.
+- **TV Layout Menu (`📐 Méret & Rés`)**: Instant presets (*Cinema Full*, *Balanced*, *Compact*) and precise sliders for gap, wheel, and card sizing persisted in `localStorage` (`hit_tv_layout_prefs`).
+- **Kerék Stúdió PRO TV**: Modal expands up to 1550px width (`w-[95vw]`), featuring a 420px live preview wheel, maximize toggle, and high-legibility inputs.
 - `tvScale`: UI zoom scaler (90% to 160%, presets: 100%, 115%, 125%, 140%, 155%), persisted in `localStorage`.
 - Keyboard shortcuts: `Space` (flip/play), `P` (play/pause), `ArrowRight` (next), `R` (spin), `F` (fullscreen), `T` (toggle 16:9 TV mode).
 
