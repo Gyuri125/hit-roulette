@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import tracksData from "../data/tracks.json";
+import { QRCodeSVG } from "qrcode.react";
 import { MusicCard, GuessTarget } from "../components/MusicCard";
 import { RouletteWheel, Category } from "../components/RouletteWheel";
 import {
@@ -347,8 +347,35 @@ const NeonEqualizerBar: React.FC<{ isPlaying: boolean; accentColor: string }> = 
   );
 };
 
+// ================= HAPTIKUS REZGÉS (VIBRATION API) SEGÉDFÜGGVÉNY =================
+const triggerHaptic = (
+  pattern: "festive_win" | "joker_win" | "risk_loss" | "warning_pulse" | "tap" | "subtle"
+) => {
+  if (typeof window === "undefined" || !("vibrate" in navigator)) return;
+  try {
+    if (pattern === "festive_win") {
+      // Hosszú, ünnepi dupla rezgés nyeréskor: [200ms rezgés, 100ms szünet, 350ms rezgés]
+      navigator.vibrate([200, 100, 350]);
+    } else if (pattern === "joker_win") {
+      // Ünnepi tripla rezgés Joker X megszerzésekor: [150ms rezgés, 80ms szünet, 150ms rezgés, 80ms szünet, 400ms rezgés]
+      navigator.vibrate([150, 80, 150, 80, 400]);
+    } else if (pattern === "risk_loss") {
+      // Rövid, éles figyelmeztető rezgés bukáskor: [90ms, 40ms, 90ms, 40ms, 240ms]
+      navigator.vibrate([90, 40, 90, 40, 240]);
+    } else if (pattern === "warning_pulse") {
+      // Figyelmeztető lüktetés, ha a játékos miatt áll a szerencsekerék: [120ms, 80ms, 120ms, 80ms, 120ms, 80ms, 300ms]
+      navigator.vibrate([120, 80, 120, 80, 120, 80, 300]);
+    } else if (pattern === "tap") {
+      navigator.vibrate(35);
+    } else if (pattern === "subtle") {
+      navigator.vibrate(15);
+    }
+  } catch (_) {}
+};
+
 export default function Home() {
-  const allTracks: Track[] = tracksData;
+  const [allTracks, setAllTracks] = useState<Track[]>([]);
+  const [isLoadingTracks, setIsLoadingTracks] = useState<boolean>(true);
 
   const { absoluteMinYear, absoluteMaxYear } = React.useMemo(() => {
     const validYears = allTracks
@@ -759,6 +786,34 @@ export default function Home() {
   const nextPreloadTrack = filteredTracks[nextPreloadIndex] || allTracks[0];
   const currentAccent = activeCategory?.accent || "#f59e0b";
 
+  // 🎵 DAL-ELŐTÖLTÉS A HÁTTÉRBEN (AUDIO & BORÍTÓKÉP PRELOAD)
+  const preloadedAudioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (!nextPreloadTrack?.audioUrl || isJoinedAsClient) return;
+
+    try {
+      if (!preloadedAudioElementRef.current) {
+        preloadedAudioElementRef.current = new Audio();
+      }
+      const pre = preloadedAudioElementRef.current;
+      pre.preload = "auto";
+      if (pre.src !== nextPreloadTrack.audioUrl) {
+        pre.src = nextPreloadTrack.audioUrl;
+        pre.load();
+      }
+    } catch (err) {
+      console.debug("Audio előtöltés megjegyzés:", err);
+    }
+
+    if (nextPreloadTrack.coverUrl) {
+      try {
+        const img = new Image();
+        img.src = nextPreloadTrack.coverUrl;
+      } catch (_) {}
+    }
+  }, [nextPreloadTrack?.audioUrl, nextPreloadTrack?.coverUrl, isJoinedAsClient]);
+
   // ================= 1. WAKE LOCK ÉS 5. VISIBILITY RECONNECT =================
   const requestWakeLock = async () => {
     if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
@@ -912,6 +967,37 @@ export default function Home() {
     hostHydratedRef.current = true;
   }, []);
 
+  // ⚡ tracks.json lekérése a dinamikus API végpontról
+  // (Host TV letölti és a Cache-Control fejléccel azonnal gyorsítótárazza; mobil kliens nem tölti le!)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const isMobileUrl = Boolean(params.get("room"));
+      const isMobileSaved = Boolean(localStorage.getItem("hit_room_code") && localStorage.getItem("hit_player_name"));
+      if (isJoinedAsClient || (isMobileUrl && !isHostModalOpen) || (isMobileSaved && !isHostModalOpen && !allTracks.length)) {
+        setIsLoadingTracks(false);
+        return;
+      }
+    }
+
+    if (allTracks.length > 0) return;
+
+    setIsLoadingTracks(true);
+    fetch("/api/tracks")
+      .then((res) => {
+        if (!res.ok) throw new Error("Hálózati hiba a dalok lekérésekor");
+        return res.json();
+      })
+      .then((data: Track[]) => {
+        setAllTracks(data);
+        setIsLoadingTracks(false);
+      })
+      .catch((err) => {
+        console.error("Hiba a dalok betöltésekor:", err);
+        setIsLoadingTracks(false);
+      });
+  }, [isJoinedAsClient, isHostModalOpen, allTracks.length]);
+
   // Házigazda (TV) állapot folyamatos mentése
   useEffect(() => {
     if (!hostHydratedRef.current || isJoinedAsClient || typeof window === "undefined") return;
@@ -998,18 +1084,22 @@ export default function Home() {
     return idx !== -1 ? idx : 0;
   };
 
+  const isInitialTrackPickedRef = useRef<boolean>(false);
   useEffect(() => {
     if (filteredTracks.length > 0) {
-      const rndIdx = Math.floor(Math.random() * filteredTracks.length);
-      const firstId = filteredTracks[rndIdx].id;
-      setCurrentIndex(rndIdx);
-      setPlayedIds([firstId]);
-      const preloadIdx = computeCandidateIndex(filteredTracks, [firstId], firstId);
-      setNextPreloadIndex(preloadIdx);
-      handleStop(true);
-      setIsFlipped(false);
+      if (!isInitialTrackPickedRef.current || playedIds.length === 0) {
+        isInitialTrackPickedRef.current = true;
+        const rndIdx = Math.floor(Math.random() * filteredTracks.length);
+        const firstId = filteredTracks[rndIdx].id;
+        setCurrentIndex(rndIdx);
+        setPlayedIds([firstId]);
+        const preloadIdx = computeCandidateIndex(filteredTracks, [firstId], firstId);
+        setNextPreloadIndex(preloadIdx);
+        handleStop(true);
+        setIsFlipped(false);
+      }
     }
-  }, [musicFilter, minYear, maxYear]);
+  }, [filteredTracks.length, musicFilter, minYear, maxYear]);
 
   const handleCreateRoom = () => {
     if (!roomCode) {
@@ -1135,9 +1225,7 @@ export default function Home() {
       if (!isJoinedAsClient) return;
       if (clientCredits > 0 || clientJokerCredits > 0 || clientPenaltyDebt > 0) {
         setClientRewardBanner("⚠️ Figyelem! Még be kell húznod a kapott X-et a tábládra!");
-        if (typeof window !== "undefined" && "vibrate" in navigator) {
-          try { navigator.vibrate([150, 70, 150, 70, 250]); } catch (_) {}
-        }
+        triggerHaptic("warning_pulse");
         playMarkerSound(true);
       }
     });
@@ -1185,8 +1273,12 @@ export default function Home() {
         }
 
         setClientRewardBanner(bannerText || `🎉 Sikeres kör! (${myAward.reason})`);
-        if (typeof window !== "undefined" && "vibrate" in navigator) {
-          try { navigator.vibrate([50, 40, 90]); } catch (_) {}
+        if (deltaJoker > 0) {
+          triggerHaptic("joker_win");
+        } else if (deltaCr > 0) {
+          triggerHaptic("festive_win");
+        } else {
+          triggerHaptic("tap");
         }
         playMarkerSound(true);
       } else if (myAward.penalty > 0) {
@@ -1206,6 +1298,7 @@ export default function Home() {
             return prev;
           }
         });
+        triggerHaptic("risk_loss");
       }
     });
 
@@ -1402,9 +1495,7 @@ export default function Home() {
   };
 
   const sendRemoteCommand = (command: "toggle_play" | "flip" | "next" | "spin" | "switch_tab" | "open_podium") => {
-    if (typeof window !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate(25); } catch (_) {}
-    }
+    triggerHaptic("tap");
     if (channelRef.current) {
       channelRef.current.send({
         type: "broadcast",
@@ -1415,9 +1506,7 @@ export default function Home() {
   };
 
   const sendClientReaction = (emoji: string, sound?: SoundEffectType) => {
-    if (typeof window !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate(20); } catch (_) {}
-    }
+    triggerHaptic("subtle");
     if (channelRef.current) {
       channelRef.current.send({
         type: "broadcast",
@@ -1428,9 +1517,7 @@ export default function Home() {
   };
 
   const handleClientSubmitGuess = () => {
-    if (typeof window !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate([30, 50, 30]); } catch (_) {}
-    }
+    triggerHaptic("tap");
     setIsGuessLocked(true);
     const combined = [clientGuessArtist, clientGuessTitle].filter(Boolean).join(" - ") || clientGuessText;
     if (channelRef.current) {
@@ -1450,9 +1537,7 @@ export default function Home() {
   };
 
   const handleClientBuzzer = () => {
-    if (typeof window !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate([60, 40, 80]); } catch (_) {}
-    }
+    triggerHaptic("festive_win");
     if (channelRef.current) {
       channelRef.current.send({
         type: "broadcast",
@@ -1475,9 +1560,7 @@ export default function Home() {
     // ⛔ CSALÁSVÉDELEM: Csak a pörgetett kategória színére tehető X (kivéve ha Joker X van)!
     if (willBeMarked && !hasJoker && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
       setClientRewardBanner(`⛔ Csak a pörgetett színre (${activeCategory?.label || "Aktív szín"}) tehetsz X-et!`);
-      if (typeof window !== "undefined" && "vibrate" in navigator) {
-        try { navigator.vibrate([100, 50, 100]); } catch (_) {}
-      }
+      triggerHaptic("risk_loss");
       return;
     }
 
@@ -1526,10 +1609,7 @@ export default function Home() {
     }
 
     playMarkerSound(willBeMarked);
-
-    if (typeof window !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate(willBeMarked ? 35 : 15); } catch (_) {}
-    }
+    triggerHaptic(willBeMarked ? "tap" : "subtle");
 
     const newGrid = clientGrid.map((row, rIdx) =>
       row.map((cell, cIdx) => (rIdx === r && cIdx === c ? !cell : cell))
@@ -1538,7 +1618,10 @@ export default function Home() {
     localStorage.setItem("hit_player_grid", JSON.stringify(newGrid));
 
     const hasWon = checkBingo(newGrid);
-    if (hasWon) confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
+    if (hasWon) {
+      confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
+      triggerHaptic("festive_win");
+    }
 
     if (channelRef.current) {
       channelRef.current.send({
@@ -2034,9 +2117,6 @@ export default function Home() {
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://hit-roulette-party.vercel.app";
   const joinUrl = `${baseUrl}?room=${roomCode}`;
-  const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
-    joinUrl
-  )}&bgcolor=171717&color=fbbf24`;
 
   const onlinePlayers = players.filter((p) => p.isOnline);
 
@@ -3561,7 +3641,13 @@ export default function Home() {
                     }`}
                     style={isTvMode ? { width: `${tvCardWidth}px`, maxWidth: "100%" } : undefined}
                   >
-                    {filteredTracks.length > 0 ? (
+                    {isLoadingTracks ? (
+                      <div className="w-80 h-96 rounded-3xl border border-neutral-800 bg-neutral-900/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center text-neutral-400 gap-3 shadow-2xl animate-pulse">
+                        <Disc className="w-12 h-12 text-amber-400 animate-spin" />
+                        <p className="text-sm font-bold text-neutral-200">Dalok betöltése a felhőből...</p>
+                        <p className="text-[11px] text-neutral-500 font-mono">687 dal és dalszöveg előkészítése</p>
+                      </div>
+                    ) : filteredTracks.length > 0 ? (
                       <MusicCard
                         track={currentTrack}
                         isFlipped={isFlipped}
@@ -4118,8 +4204,15 @@ export default function Home() {
                   </h2>
                 </div>
 
-                <div className="p-3 bg-neutral-950 rounded-2xl border border-neutral-800 shadow-inner">
-                  <img src={qrCodeImageUrl} alt="Room QR Code" className="w-48 h-48 rounded-lg" />
+                <div className="p-3 bg-neutral-950 rounded-2xl border border-neutral-800 shadow-inner flex items-center justify-center">
+                  <QRCodeSVG
+                    value={joinUrl}
+                    size={192}
+                    bgColor="#0a0a0a"
+                    fgColor="#fbbf24"
+                    level="M"
+                    className="rounded-lg shadow-sm"
+                  />
                 </div>
 
                 <div className="w-full bg-neutral-950 p-2.5 rounded-xl border border-neutral-800 flex flex-col gap-1">

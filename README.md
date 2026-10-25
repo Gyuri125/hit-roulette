@@ -39,11 +39,14 @@ A **Hit-Roulette** egy modern, böngészőből futtatható parti társasjáték,
 | **Szinkronizált dalszöveg (LRC)** | Karaoke jellegű, soronként időzített dalszövegek; a kártya automatikusan a pillanatnyilag énekelt sorhoz görget. |
 | **Smart Intro Skip** | Az LRC időbélyegekből automatikusan kiszámítja, mikor kezdődik az ének, és 5 másodperccel az ének elé ugrik a holtidők elkerülésére. |
 | **Audio Fade-In / Fade-Out** | Finom 1.5 másodperces hangerő-felfutás és elhalkulás leállításkor vagy az időzítő lejártakor (nincs recsegő hirtelen vágás). |
-| **Következő dal előtöltése** | A háttérben azonnal előkészíti és puffereli a következő kör dalát a folyamatos játékélményért. |
+| **Következő dal & borítókép előtöltése** | A háttérben futó előtöltő motor aktívan puffereli a következő dalt és letölti a borítóképet, így a következő kör 0 mp késlekedéssel indul. |
 | **Szigorú Kvíz Mód & Csalásvédelem** | Automatikus pontszámítás: csak az tehet le X-et a táblájára, aki helyesen tippel. A sikertelen „Dupla vagy Semmi” büntetéssel jár (radírozás). |
 | **Kipörgetett Színhez Kötött X Behúzás** | Csak a kerekén kipörgetett kategória színével megegyező mezőkre tehető X. A többi mező zárolt és halványított, a megfelelő mezők pulzáló fénnyel vezetnek. |
 | **Részpont (Törtpont) Rendszer & Joker X** | Ha a feladvány pl. megjelenési év, de a játékos tudja az előadót vagy címet is, konfigurálható arányú törtpontot kap (`KI`, `1/3`, `1/5`, `1/10`), ami 1 egészre gyűlve tetszőleges színre letehető **Joker X**-re váltódik át! |
 | **Pörgetési Zár (Kihagyás- & Csalásvédelem)** | Ha van olyan játékos, aki még nem húzta be a megérdemelt X-et (vagy nem vonta le a büntetést), a kerék nem indulhat el; figyelmeztető ablak és mobil rezgés ébreszti. |
+| **Bővített Haptikus Rezgésmotor** | Különféle valós idejű rezgésminták okostelefonon (hosszú ünnepi dupla rezgés nyeréskor, tripla Joker X-nél, éles rezgés elbukott kockáztatáskor, lüktetés lemaradáskor). |
+| **Helyi Offline QR-Kód (`qrcode.react`)** | Teljesen helyben generált, kristálytiszta SVG QR-kód; nincs külső képgeneráló API függőség, offline környezetben is azonnal működik. |
+| **Bundle Méret Optimalizáció (`/api/tracks`)** | A 687 dalt tartalmazó 1.63 MB-os adatbázis ki lett szervezve a kliens bundle-ből egy dedikált API végpontra HTTP gyorstárral, így a telefonok másodperc-töredék alatt töltik be az appot. |
 | **Részletes Díjátadó & Karakter Különdíjak** | 8 egyedi különdíj (👑 Bajnok, 🎯 Sniper, ⚡ Villámagyú reakcióidő, 🤔 Taktikus átíró, ⏳ Időutazó mellélövés dalcímmel, 🔔 Buzzer, 🎲 Kaszinó királya, 💀 Főnix) + Részletes Játékos Kartoték és statisztikai táblázat. |
 | **Fuzzy Levenshtein értékelés** | Ékezetmentesítő, írásjel-eltávolító és 75%-os elgépeléstűrő Levenshtein távolság motor a szöveges tippekhez. |
 | **Web Audio szintézis** | Zéró külső hangfájl terhelés: minden kattanás, csilingelés, légkürt, fanfár és harsona közvetlenül a böngésző AudioContext oszcillátoraival generálódik. |

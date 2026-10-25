@@ -183,6 +183,22 @@ Host and players communicate on channel `room_${roomCode}` using broadcast event
 - **Külön Vizuális Elválasztás**: A kártya felfordításakor (`isFlipped`) a TV képernyőn a Nagypont (`+1 X [Kötött Szín]`) és a Részpont (`⭐ +1× Részpont: 🎤 Előadó ✓ • Haladás: 2/3 ⭐`) teljesen különálló, látványos kártyarészben jelenik meg.
 - **Kézi Felülbírálás & Táblázatos Mérleg**: A Házigazda a kiértékelésben `+⭐` gombbal közvetlenül is küldhet Joker X-et, a Díjátadó részletes kartotékában pedig külön oszlop mutatja a játékosok összesített részpontjait és Joker X váltásait.
 
+### 9. Dal- és Borítókép Előtöltés (Audio & Cover Preloading)
+- **Zero-Latency Zenestart**: Amíg a TV-n pörög a kerék vagy a Házigazda a kört értékeli, a háttérben futó előtöltő motor (`preloadedAudioElementRef`) aktívan meghívja az `audio.load()` metódust a következő kisorsolt dalra (`nextPreloadTrack.audioUrl`).
+- **Lemezborító Gyorsítótárazás**: Az `Image()` konstruktor segítségével a lemezborító már a megfordítás előtt a memóriában van, így a kártya animációja azonnal és akadásmentesen jeleníti meg a borítót.
+
+### 10. Bővített Haptikus Rezgésmotor (`triggerHaptic`)
+- Különböző valós idejű rezgésminták az okostelefonokon a Vibration API segítségével:
+  - 🎆 `festive_win`: Hosszú, ünnepi dupla rezgés (`[200, 100, 350]`) telitalálat vagy Bingó esetén.
+  - ⭐ `joker_win`: Ritmusos tripla ünnepi rezgés (`[150, 80, 150, 80, 400]`) Joker X beváltásakor.
+  - 💀 `risk_loss`: Rövid, éles figyelmeztető lüktetés (`[90, 40, 90, 40, 240]`) elbukott Dupla vagy Semmi vagy rossz színre kattintás esetén.
+  - ⚠️ `warning_pulse`: Lüktető figyelmeztetés (`[120, 80, 120, 80, 120, 80, 300]`), ha a játékos lemaradása miatt áll a szerencsekerék (`ping_pending_marks`).
+  - 🎯 `tap` / `subtle`: Finom kattintási visszajelzés X behúzáskor vagy reakció küldésekor.
+
+### 11. Helyi, Offline QR-Kód Generálás (`qrcode.react`)
+- A csatlakozási QR-kód teljesen kliensoldali SVG-ként (`<QRCodeSVG />`) renderelődik a szobakód ablakban.
+- Külső hálózati API függőség (`api.qrserver.com`) megszűnt, így offline környezetben vagy szigorú tartalomszűrők mögött is azonnal betölt.
+
 ---
 
 ## 6. Security & Authentication (`PinGate`)
@@ -198,12 +214,12 @@ Host and players communicate on channel `room_${roomCode}` using broadcast event
 When modifying or expanding the codebase, prioritize these areas:
 
 1. **`page.tsx` Monolith Deconstruction**:
-   - `src/app/page.tsx` is over 2,700 lines. Separate Host UI (`HostView.tsx`) and Mobile Client UI (`MobileClientView.tsx`).
+   - `src/app/page.tsx` is over 3,000 lines. Separate Host UI (`HostView.tsx`) and Mobile Client UI (`MobileClientView.tsx`).
    - Fill in `AudioPlayer.tsx` and `SettingsModal.tsx` which are currently 0-byte placeholders.
-2. **Bundle Optimization (`tracks.json`)**:
-   - `src/data/tracks.json` is 1.63 MB and imported directly into `page.tsx`. This inflates the client JS bundle. Consider lazy loading or an API endpoint.
-3. **Local QR Code Generator**:
-   - Currently uses `api.qrserver.com`. Replace with a local client-side QR renderer (e.g., `qrcode.react`) to eliminate external network dependency.
+2. **Bundle Optimization (`tracks.json`) [MEGOLDVA ✅]**:
+   - `tracks.json` (1.63 MB) kiszállítva a kliens bundle-ből az `/api/tracks` végpontra, hosszú távú HTTP gyorsítótárazással (`Cache-Control: public, max-age=86400`). A mobil kliensek betöltési mérete töredékére csökkent.
+3. **Local QR Code Generator [MEGOLDVA ✅]**:
+   - Natív `qrcode.react` komponenssel helyettesítve a külső szervert.
 
 ---
 
