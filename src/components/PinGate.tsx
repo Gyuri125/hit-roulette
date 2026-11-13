@@ -110,7 +110,7 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
         setErrorMsg("");
         setFailedAttempts(0);
         setPinInput("");
-      } else {
+      } else if (res.status === 401 || res.status === 429) {
         const nextAttempts = failedAttempts + 1;
         setFailedAttempts(nextAttempts);
         const penaltySeconds =
@@ -118,7 +118,15 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
             ? data.retryAfter
             : Math.min(300, Math.pow(nextAttempts, 2));
         setLockTimeLeft(penaltySeconds);
-        setErrorMsg(data?.error || `Hibás PIN! Zárolva: ${penaltySeconds} másodpercre.`);
+        setErrorMsg(res.status === 429 ? "Túl sok hibás próbálkozás!" : "Hibás belépőkód!");
+        setPinInput("");
+        setShake(true);
+        setTimeout(() => setShake(false), 450);
+      } else {
+        setLockTimeLeft(0);
+        setErrorMsg(
+          data?.error || `Szerverhiba (${res.status}). Kérlek ellenőrizd a környezeti változókat és indíts Redeploy-t!`
+        );
         setPinInput("");
         setShake(true);
         setTimeout(() => setShake(false), 450);
@@ -197,9 +205,10 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
               ))}
             </div>
 
-            {errorMsg && (
+            {(errorMsg || lockTimeLeft > 0) && (
               <p className="text-xs text-rose-400 font-bold leading-tight bg-rose-500/10 border border-rose-500/30 py-2 px-3 rounded-xl">
-                {lockTimeLeft > 0 ? `⏳ Újrapróbálás: ${lockTimeLeft} mp múlva` : errorMsg}
+                {errorMsg}
+                {lockTimeLeft > 0 ? ` ⏳ Újrapróbálás: ${lockTimeLeft} mp múlva` : ""}
               </p>
             )}
 
