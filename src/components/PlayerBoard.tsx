@@ -1,18 +1,31 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone, Eraser, LayoutGrid, Shuffle } from "lucide-react";
+import { Users, RotateCcw, Plus, Trash2, Trophy, Disc, X, Smartphone, Eraser, LayoutGrid, Shuffle, AlertTriangle } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Category } from "./RouletteWheel";
+import { getSharedAudioContext, playMarkerSound } from "../lib/audioEffects";
+import {
+  TILE_COLORS,
+  generateRandomColorGrid,
+  createEmptyGrid,
+  checkBingo,
+  getWinningCells,
+  getMatchPointCells,
+  isOneAwayFromBingo,
+} from "../lib/bingoLogic";
 
-export const TILE_COLORS = [
-  "#f59e0b", // Sárga (Évszám)
-  "#10b981", // Zöld (Dalcím)
-  "#ec4899", // Rózsaszín (Előadó)
-  "#8b5cf6", // Lila (Mindent bele)
-  "#06b6d4", // Kék (Szabad tipp / Bónusz)
-];
+export {
+  getSharedAudioContext,
+  playMarkerSound,
+  TILE_COLORS,
+  generateRandomColorGrid,
+  createEmptyGrid,
+  checkBingo,
+  getMatchPointCells,
+  isOneAwayFromBingo,
+};
 
 // 🎨 Pörgetett kategória színindexének lekérése (0..4, vagy -1 ha joker/bónusz/bármelyik)
 export const getCategoryColorIndex = (cat?: Category | null): number => {
@@ -44,100 +57,9 @@ export interface PlayerData {
   debt?: number;    // büntetésből radírozandó X
 }
 
-// 🎲 Kiegyensúlyozott véletlenszerű 5x5 táblagenerátor (minden színből pontosan 5 db)
-export const generateRandomColorGrid = (): number[][] => {
-  const flat: number[] = [];
-  for (let color = 0; color < 5; color++) {
-    for (let count = 0; count < 5; count++) {
-      flat.push(color);
-    }
-  }
-  for (let i = flat.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const temp = flat[i];
-    flat[i] = flat[j];
-    flat[j] = temp;
-  }
-  const result: number[][] = [];
-  for (let r = 0; r < 5; r++) {
-    result.push(flat.slice(r * 5, (r + 1) * 5));
-  }
-  return result;
-};
+// Színindex kalkuláció és Tábla interfész
 
-export const createEmptyGrid = () =>
-  Array(5)
-    .fill(null)
-    .map(() => Array(5).fill(false));
-
-export const checkBingo = (grid: boolean[][]): boolean => {
-  for (let r = 0; r < 5; r++) {
-    if (grid[r].every(Boolean)) return true;
-  }
-  for (let c = 0; c < 5; c++) {
-    if ([0, 1, 2, 3, 4].every((r) => grid[r][c])) return true;
-  }
-  if ([0, 1, 2, 3, 4].every((i) => grid[i][i])) return true;
-  if ([0, 1, 2, 3, 4].every((i) => grid[i][4 - i])) return true;
-
-  return false;
-};
-
-const getWinningCells = (grid: boolean[][]): Set<string> => {
-  const winning = new Set<string>();
-  for (let r = 0; r < 5; r++) {
-    if (grid[r].every(Boolean)) [0, 1, 2, 3, 4].forEach((c) => winning.add(`${r}-${c}`));
-  }
-  for (let c = 0; c < 5; c++) {
-    if ([0, 1, 2, 3, 4].every((r) => grid[r][c])) [0, 1, 2, 3, 4].forEach((r) => winning.add(`${r}-${c}`));
-  }
-  if ([0, 1, 2, 3, 4].every((i) => grid[i][i])) [0, 1, 2, 3, 4].forEach((i) => winning.add(`${i}-${i}`));
-  if ([0, 1, 2, 3, 4].every((i) => grid[i][4 - i])) [0, 1, 2, 3, 4].forEach((i) => winning.add(`${i}-${4 - i}`));
-  return winning;
-};
-
-// ================= SINGLETON WEB AUDIO MOTOR =================
-export const getSharedAudioContext = (): AudioContext | null => {
-  if (typeof window === "undefined") return null;
-  const win = window as any;
-  if (!win.__hitsterAudioCtx) {
-    const AudioCtx = window.AudioContext || win.webkitAudioContext;
-    if (AudioCtx) {
-      win.__hitsterAudioCtx = new AudioCtx();
-    }
-  }
-  if (win.__hitsterAudioCtx && win.__hitsterAudioCtx.state === "suspended") {
-    win.__hitsterAudioCtx.resume().catch(() => {});
-  }
-  return win.__hitsterAudioCtx || null;
-};
-
-export const playMarkerSound = (isMarking: boolean) => {
-  try {
-    const ctx = getSharedAudioContext();
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    if (isMarking) {
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(460, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.05);
-      gain.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-    } else {
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(220, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(320, ctx.currentTime + 0.04);
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
-    }
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.05);
-  } catch (_) {}
-};
+// Audio függvények a központi lib/audioEffects modulból importálva és újraexportálva
 
 interface PlayerBoardProps {
   players: PlayerData[];
@@ -160,12 +82,24 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   isPlayingMusic,
   activeCategory = null,
   tvMode = false,
-  tvScale = 100,
+  tvScale: _tvScale = 100,
 }) => {
   const [winnerAlert, setWinnerAlert] = useState<string | null>(null);
+  const [boardWarning, setBoardWarning] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState<boolean>(false);
   const [showAllBoards, setShowAllBoards] = useState<boolean>(false);
 
   const currentPlayer = players[activePlayerIdx] || players[0];
+
+  useEffect(() => {
+    if (!boardWarning) return;
+    const timer = setTimeout(() => setBoardWarning(null), 3500);
+    return () => clearTimeout(timer);
+  }, [boardWarning]);
+
+  useEffect(() => {
+    setConfirmReset(false);
+  }, [activePlayerIdx]);
 
   const toggleCell = (targetPlayerIdx: number, rIdx: number, cIdx: number) => {
     const targetPlayer = players[targetPlayerIdx];
@@ -178,7 +112,9 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
 
     // ⛔ CSALÁSVÉDELEM: Csak a pörgetett színre engedélyezett az X behúzása (kivéve ha Joker X van!)
     if (willBeMarked && !hasJoker && targetColorIdx !== -1 && tileColorIdx !== targetColorIdx) {
-      alert(`⛔ Csak a pörgetett kategória színére (${activeCategory?.label || "Kiválasztott szín"}) tehetsz X-et! (Joker X esetén bármilyen szín megjelölhető)`);
+      setBoardWarning(
+        `Csak a pörgetett kategória színére (${activeCategory?.label || "Kiválasztott szín"}) tehetsz X-et! (Joker X esetén bármilyen szín megjelölhető)`
+      );
       return;
     }
 
@@ -248,14 +184,14 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
     setPlayers((prev) => prev.map((p, idx) => (idx === activePlayerIdx ? { ...p, notes } : p)));
   };
 
-    React.useEffect(() => {
+    useEffect(() => {
       const needsColorGrid = players.some((p) => !p.colorGrid || p.colorGrid.length !== 5);
       if (needsColorGrid) {
         setPlayers((prev) =>
           prev.map((p) => (!p.colorGrid || p.colorGrid.length !== 5 ? { ...p, colorGrid: generateRandomColorGrid() } : p))
         );
       }
-    }, []);
+    }, [players, setPlayers]);
 
     const addPlayer = () => {
     if (players.length >= 10) return;
@@ -279,6 +215,13 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   };
 
   const resetCurrentGrid = () => {
+    const hasMarks = currentPlayer?.grid.some((row) => row.some(Boolean));
+    if (hasMarks && !confirmReset) {
+      setConfirmReset(true);
+      setTimeout(() => setConfirmReset(false), 4000);
+      return;
+    }
+    setConfirmReset(false);
     setPlayers((prev) =>
       prev.map((p, idx) => (idx === activePlayerIdx ? { ...p, grid: createEmptyGrid(), hasWon: false } : p))
     );
@@ -293,10 +236,28 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
   if (!currentPlayer) return null;
 
   const winningCells = getWinningCells(currentPlayer.grid);
+  const matchPointCells = getMatchPointCells(currentPlayer.grid);
+  const isCurrentMatchPoint = matchPointCells.size > 0;
   const score = currentPlayer.grid.flat().filter(Boolean).length;
+  const matchPointPlayers = players.filter((p) => !p.hasWon && isOneAwayFromBingo(p.grid));
 
   return (
     <div className="w-full max-w-5xl flex flex-col items-center gap-4 px-2">
+      {boardWarning && (
+        <div className="w-full max-w-xl bg-rose-500/15 border-2 border-rose-500/60 px-4 py-2.5 rounded-2xl flex items-center justify-between gap-2 shadow-xl backdrop-blur-md text-xs font-bold text-rose-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{boardWarning}</span>
+          </div>
+          <button
+            onClick={() => setBoardWarning(null)}
+            className="p-1 rounded-lg hover:bg-rose-500/20 text-rose-300"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {winnerAlert && (
         <div className="w-full max-w-xl bg-gradient-to-r from-amber-500/20 via-rose-500/20 to-violet-500/20 border-2 border-amber-400 p-4 rounded-2xl flex items-center justify-between shadow-2xl backdrop-blur-md animate-bounce">
           <div className="flex items-center gap-3">
@@ -334,6 +295,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-1">
             {players.map((p, idx) => {
               const pScore = p.grid.flat().filter(Boolean).length;
+              const pNearBingo = !p.hasWon && isOneAwayFromBingo(p.grid);
               return (
                 <button
                   key={p.id}
@@ -344,12 +306,19 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                   className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap border ${
                     !showAllBoards && activePlayerIdx === idx
                       ? "bg-amber-500 text-neutral-950 border-amber-400 shadow-md"
+                      : pNearBingo
+                      ? "bg-rose-500/15 text-amber-200 border-rose-500/50 hover:border-amber-400"
                       : "bg-neutral-900 text-neutral-400 border-neutral-800 hover:text-white"
                   }`}
                 >
                   {p.isOnline ? <Smartphone className="w-3.5 h-3.5 text-cyan-400" /> : <Users className="w-3.5 h-3.5" />}
                   <span>{p.name}</span>
                   <span className="text-[10px] opacity-75 font-mono">({pScore})</span>
+                  {pNearBingo && (
+                    <span title="Meccslabda! 1 X-re a Bingótól!" className="animate-pulse">
+                      🔥
+                    </span>
+                  )}
                   {p.hasWon && <Trophy className="w-3.5 h-3.5 text-amber-300 fill-current" />}
                 </button>
               );
@@ -383,11 +352,22 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
         </div>
       </div>
 
+      {matchPointPlayers.length > 0 && (
+        <div className="w-full max-w-xl px-4 py-2 rounded-2xl bg-gradient-to-r from-rose-500/20 via-amber-500/20 to-rose-500/20 border-2 border-amber-400/70 text-amber-200 text-xs font-black flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.25)] animate-pulse">
+          <span>🔥 MECCSLABDA (1 X-RE A BINGÓTÓL):</span>
+          <span className="text-white uppercase">
+            {matchPointPlayers.map((p) => p.name).join(", ")}
+          </span>
+        </div>
+      )}
+
       {showAllBoards ? (
         <div className={`w-full grid ${tvMode ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"} pt-2`}>
           {players.map((player, pIdx) => {
             const pScore = player.grid.flat().filter(Boolean).length;
             const pWinCells = getWinningCells(player.grid);
+            const pMatchCells = getMatchPointCells(player.grid);
+            const pNearBingo = pMatchCells.size > 0;
             return (
               <div
                 key={player.id}
@@ -396,15 +376,24 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                   setShowAllBoards(false);
                 }}
                 className={`cursor-pointer rounded-3xl bg-neutral-900/90 border-2 p-4 flex flex-col gap-3 transition hover:scale-[1.01] shadow-xl ${
-                  player.hasWon ? "border-amber-400 shadow-amber-500/10" : "border-neutral-800 hover:border-neutral-700"
+                  player.hasWon
+                    ? "border-amber-400 shadow-amber-500/10"
+                    : pNearBingo
+                    ? "border-rose-500/80 shadow-[0_0_25px_rgba(244,63,94,0.25)]"
+                    : "border-neutral-800 hover:border-neutral-700"
                 }`}
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-1.5">
                     {player.isOnline && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
-                    <span className="font-black text-sm uppercase text-amber-400 truncate max-w-[150px]">
+                    <span className="font-black text-sm uppercase text-amber-400 truncate max-w-[130px]">
                       {player.name}
                     </span>
+                    {pNearBingo && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/25 border border-rose-400 text-rose-200 font-black animate-pulse">
+                        🔥 1 X!
+                      </span>
+                    )}
                     {player.hasWon && <Trophy className="w-4 h-4 text-amber-300" />}
                   </div>
                   <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-neutral-950 border border-neutral-800 text-neutral-300">
@@ -416,6 +405,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                   {player.grid.map((row, r) =>
                     row.map((isMarked, c) => {
                       const isWinTile = pWinCells.has(`${r}-${c}`);
+                      const isMatchTile = pMatchCells.has(`${r}-${c}`);
                       const colorIdx = player.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
                       const hasJoker = (player.jokerCredits ?? 0) > 0;
                       const targetColorIdx = getCategoryColorIndex(activeCategory);
@@ -433,13 +423,17 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                           className={`aspect-square rounded-lg flex items-center justify-center font-black text-lg text-neutral-950 transition ${
                             isWinTile ? "ring-2 ring-white scale-105 z-10" : ""
                           } ${
+                            isMatchTile
+                              ? "ring-2 ring-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.95)]"
+                              : ""
+                          } ${
                             isHighlight ? "ring-2 ring-white shadow-[0_0_10px_rgba(255,255,255,0.7)] animate-pulse" : ""
                           } ${
                             isDimmed ? "opacity-35 hover:opacity-50 cursor-not-allowed" : ""
                           }`}
                           style={{ backgroundColor: TILE_COLORS[colorIdx] }}
                         >
-                          {isMarked ? "✕" : ""}
+                          {isMarked ? "✕" : isMatchTile ? <span className="text-[11px] opacity-80">🔥</span> : ""}
                         </button>
                       );
                     })
@@ -500,7 +494,14 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
             </div>
           )}
 
-          {/* ⭐ JOKER X JELZŐSÁV */}
+          {/* ⭐ JOKER X & MECCSLABDA JELZŐSÁVOK */}
+          {isCurrentMatchPoint && (
+            <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/20 border border-rose-400 text-xs font-black text-rose-200 animate-pulse">
+              <span>🔥 MECCSLABDA!</span>
+              <span className="text-[11px] text-amber-300">Már csak 1 X hiányzik a Bingóhoz!</span>
+            </div>
+          )}
+
           {(currentPlayer.jokerCredits ?? 0) > 0 && (
             <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-400 text-xs font-bold text-amber-300 animate-pulse">
               <span className="flex items-center gap-1.5">
@@ -517,6 +518,7 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                 const colorIdx = currentPlayer.colorGrid?.[r]?.[c] ?? ((r + c) % TILE_COLORS.length);
                 const color = TILE_COLORS[colorIdx];
                 const isWinCell = winningCells.has(`${r}-${c}`);
+                const isMatchCell = matchPointCells.has(`${r}-${c}`);
                 const hasJoker = (currentPlayer.jokerCredits ?? 0) > 0;
                 const targetColorIdx = getCategoryColorIndex(activeCategory);
                 const isTargetColor = hasJoker || targetColorIdx === -1 || colorIdx === targetColorIdx;
@@ -530,12 +532,21 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
                     className={`aspect-square rounded-xl flex items-center justify-center relative transition transform active:scale-90 shadow select-none overflow-hidden ${
                       isWinCell ? "ring-4 ring-white shadow-[0_0_15px_#ffffff] scale-105 z-10" : ""
                     } ${
-                      isHighlight ? "ring-2 ring-white shadow-[0_0_14px_rgba(255,255,255,0.7)] animate-pulse scale-102" : ""
+                      isMatchCell
+                        ? "ring-4 ring-amber-300 shadow-[0_0_18px_rgba(251,191,36,0.95)]"
+                        : ""
+                    } ${
+                      isHighlight ? "ring-2 ring-white shadow-[0_0_14px_rgba(255,255,255,0.7)] animate-pulse scale-[1.02]" : ""
                     } ${
                       isDimmed ? "opacity-35 hover:opacity-50 cursor-not-allowed" : ""
                     }`}
                     style={{ backgroundColor: color }}
                   >
+                    {!isMarked && isMatchCell && (
+                      <span className="absolute top-0.5 right-1 text-[10px] pointer-events-none drop-shadow">
+                        🔥
+                      </span>
+                    )}
                     <AnimatePresence>
                       {isMarked && (
                         <motion.span
@@ -594,10 +605,14 @@ export const PlayerBoard: React.FC<PlayerBoardProps> = ({
             </button>
             <button
               onClick={resetCurrentGrid}
-              className="hover:text-rose-400 flex items-center gap-1 transition"
+              className={`flex items-center gap-1 transition font-bold ${
+                confirmReset
+                  ? "text-rose-400 bg-rose-500/15 px-2 py-0.5 rounded-lg border border-rose-500/40 animate-pulse"
+                  : "hover:text-rose-400"
+              }`}
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Tábla (X-ek) ürítése</span>
+              <span>{confirmReset ? "Biztos? Kattints újra!" : "Tábla (X-ek) ürítése"}</span>
             </button>
           </div>
         </div>

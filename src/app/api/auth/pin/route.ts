@@ -1,47 +1,96 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
+import {
+  constantTimeEqualText,
+  generateSignedToken,
+  getExpectedPin,
+  isProductionMissingPinConfig,
+  verifySignedToken,
+} from "@/lib/pinAuth";
 
-const PIN_SECRET = process.env.PIN_SECRET || "hit-roulette-default-secret-salt-2026";
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
-
-function generateSignedToken(): { token: string; expiresAt: number } {
-  const timestamp = Date.now();
-  const expiresAt = timestamp + FOUR_HOURS_MS;
-  const payload = `${timestamp}:${expiresAt}`;
-  const hmac = crypto.createHmac("sha256", PIN_SECRET).update(payload).digest("hex");
-  return {
-    token: `${payload}:${hmac}`,
-    expiresAt,
-  };
+interface RateLimitEntry {
+  attempts: number;
+  blockedUntil: number;
+  lastSeen: number;
 }
 
-function verifySignedToken(token: string): boolean {
-  if (!token) return false;
-  const parts = token.split(":");
-  if (parts.length !== 3) return false;
-  const [timestampStr, expiresAtStr, hmac] = parts;
-  const expiresAt = parseInt(expiresAtStr, 10);
-  if (isNaN(expiresAt) || Date.now() > expiresAt) return false;
+const attemptStore = new Map<string, RateLimitEntry>();
+const MAX_TRACKED_IPS = 500;
+const STALE_ENTRY_MS = 30 * 60 * 1000;
 
-  const payload = `${timestampStr}:${expiresAtStr}`;
-  const expectedHmac = crypto.createHmac("sha256", PIN_SECRET).update(payload).digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expectedHmac));
+function getClientIp(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    return forwarded.split(",")[0].trim() || "unknown";
+  }
+  return request.headers.get("x-real-ip")?.trim() || "local";
 }
 
-// POST: PIN ellenőrzése szerveroldalon
+function pruneAttemptStore(now: number) {
+  if (attemptStore.size < MAX_TRACKED_IPS) return;
+  for (const [ip, entry] of attemptStore.entries()) {
+    if (now - entry.lastSeen > STALE_ENTRY_MS) {
+      attemptStore.delete(ip);
+    }
+  }
+}
+
+// POST: PIN ellenőrzése szerveroldalon exponenciális brute-force védelemmel
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const pin = String(body?.pin || "").trim();
-    const expectedPin = (process.env.MASTER_PIN || "303646").trim();
+    if (isProductionMissingPinConfig()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Szerver konfigurációs hiba: a MASTER_PIN és PIN_SECRET beállítása kötelező!",
+        },
+        { status: 503 }
+      );
+    }
 
-    if (pin === expectedPin) {
+    const now = Date.now();
+    const ip = getClientIp(request);
+    pruneAttemptStore(now);
+
+    const existing = attemptStore.get(ip);
+    if (existing && existing.blockedUntil > now) {
+      const retryAfterSec = Math.max(1, Math.ceil((existing.blockedUntil - now) / 1000));
+      return NextResponse.json(
+        {
+          success: false,
+          retryAfter: retryAfterSec,
+          error: `Túl sok hibás próbálkozás! Próbáld újra ${retryAfterSec} mp múlva.`,
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(retryAfterSec) },
+        }
+      );
+    }
+
+    const body = await request.json();
+    const pin = String(body?.pin ?? "").trim();
+    const expectedPin = getExpectedPin();
+
+    if (pin.length > 0 && constantTimeEqualText(pin, expectedPin)) {
+      attemptStore.delete(ip);
       const { token, expiresAt } = generateSignedToken();
       return NextResponse.json({ success: true, token, expiresAt });
     }
 
+    const nextAttempts = (existing?.attempts ?? 0) + 1;
+    const penaltySeconds = Math.min(300, Math.pow(nextAttempts, 2));
+    attemptStore.set(ip, {
+      attempts: nextAttempts,
+      blockedUntil: now + penaltySeconds * 1000,
+      lastSeen: now,
+    });
+
     return NextResponse.json(
-      { success: false, error: "Hibás belépőkód!" },
+      {
+        success: false,
+        retryAfter: penaltySeconds,
+        error: `Hibás belépőkód! Újrapróbálás: ${penaltySeconds} mp múlva.`,
+      },
       { status: 401 }
     );
   } catch {
@@ -54,12 +103,20 @@ export async function POST(request: Request) {
 
 // GET: Meglévő munkamenet token érvényességének ellenőrzése
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const token = searchParams.get("token");
+  try {
+    if (isProductionMissingPinConfig()) {
+      return NextResponse.json({ valid: false, error: "Server PIN config missing" }, { status: 503 });
+    }
 
-  if (token && verifySignedToken(token)) {
-    return NextResponse.json({ valid: true });
+    const { searchParams } = new URL(request.url);
+    const token = searchParams.get("token");
+
+    if (token && verifySignedToken(token)) {
+      return NextResponse.json({ valid: true });
+    }
+
+    return NextResponse.json({ valid: false }, { status: 401 });
+  } catch {
+    return NextResponse.json({ valid: false }, { status: 400 });
   }
-
-  return NextResponse.json({ valid: false }, { status: 401 });
 }

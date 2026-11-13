@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette, Maximize2, Minimize2 } from "lucide-react";
+import { Sparkles, Trophy, Settings2, Plus, Trash2, Copy, RotateCcw, X, Layers, Palette, Maximize2, Minimize2, AlertTriangle } from "lucide-react";
 import confetti from "canvas-confetti";
-import { getSharedAudioContext } from "./PlayerBoard";
+import { getSharedAudioContext, playClickTone, playFanfareTone } from "../lib/audioEffects";
 
 export type TargetHighlight = "year" | "title" | "artist" | "all";
 
@@ -118,49 +118,12 @@ const splitLabelToLines = (text: string): [string, string] => {
   return [parts.slice(0, mid).join(" ").toUpperCase(), parts.slice(mid).join(" ").toUpperCase()];
 };
 
-const playClickTone = () => {
-  try {
-    const audioCtx = getSharedAudioContext();
-    if (!audioCtx) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(650 + Math.random() * 150, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.035);
-    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.035);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.035);
-  } catch (_) {}
-};
-
-const playFanfareTone = () => {
-  try {
-    const audioCtx = getSharedAudioContext();
-    if (!audioCtx) return;
-    const notes = [523.25, 659.25, 783.99, 1046.50];
-    notes.forEach((freq, idx) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      const startTime = audioCtx.currentTime + idx * 0.09;
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(0.2, startTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.45);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start(startTime);
-      osc.stop(startTime + 0.45);
-    });
-  } catch (_) {}
-};
+const CATEGORIES_STORAGE_KEY = "hit_roulette_categories";
 
 interface RouletteWheelProps {
   onSpinEnd?: (selectedCategory: Category) => void;
   onBeforeSpin?: () => boolean;
+  currentCategory?: Category | null;
   tvMode?: boolean;
   tvScale?: number;
   customWheelSize?: number;
@@ -169,6 +132,7 @@ interface RouletteWheelProps {
 export const RouletteWheel: React.FC<RouletteWheelProps> = ({
   onSpinEnd,
   onBeforeSpin,
+  currentCategory = null,
   tvMode = false,
   tvScale = 100,
   customWheelSize,
@@ -176,14 +140,56 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
   const [categories, setCategories] = useState<Category[]>(CATEGORIES);
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [winner, setWinner] = useState<Category | null>(null);
+  const [winner, setWinner] = useState<Category | null>(currentCategory);
   const [discoStep, setDiscoStep] = useState(0);
   const [isStudioMaximized, setIsStudioMaximized] = useState(false);
+  const [studioError, setStudioError] = useState<string | null>(null);
+  const spinTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const categoriesHydratedRef = useRef(false);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
+    try {
+      const saved = localStorage.getItem(CATEGORIES_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= 2) {
+          setCategories(parsed);
+        }
+      }
+    } catch {
+      // ignore invalid storage
+    } finally {
+      categoriesHydratedRef.current = true;
+    }
+
+    return () => {
+      spinTimeoutsRef.current.forEach((id) => clearTimeout(id));
+      spinTimeoutsRef.current = [];
+    };
   }, []);
+
+  useEffect(() => {
+    if (!categoriesHydratedRef.current) return;
+    try {
+      localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories));
+    } catch {
+      // ignore
+    }
+  }, [categories]);
+
+  useEffect(() => {
+    if (currentCategory && !isSpinning) {
+      setWinner(currentCategory);
+    }
+  }, [currentCategory, isSpinning]);
+
+  useEffect(() => {
+    if (!studioError) return;
+    const t = setTimeout(() => setStudioError(null), 3500);
+    return () => clearTimeout(t);
+  }, [studioError]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -225,18 +231,22 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
 
     setRotation(finalRotation);
 
+    spinTimeoutsRef.current.forEach((id) => clearTimeout(id));
+    spinTimeoutsRef.current = [];
+
     const delays = [
       60, 110, 160, 210, 260, 310, 360, 420, 480, 550, 630, 720, 820, 930, 1050, 1200, 1400, 1650, 1950, 2300, 2700, 3150, 3650
     ];
     delays.forEach((d) => {
       if (d < 4000) {
-        setTimeout(() => {
+        const tid = setTimeout(() => {
           playClickTone();
         }, d);
+        spinTimeoutsRef.current.push(tid);
       }
     });
 
-    setTimeout(() => {
+    const endTid = setTimeout(() => {
       setIsSpinning(false);
       setWinner(selected);
       playFanfareTone();
@@ -249,6 +259,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         colors: [selected.accent, "#ffffff", "#fbbf24"],
       });
     }, 4200);
+    spinTimeoutsRef.current.push(endTid);
   };
 
   const createSlicePath = (index: number) => {
@@ -298,7 +309,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
     e.preventDefault();
     if (!newLabel.trim()) return;
     if (categories.length >= 14) {
-      alert("Legfeljebb 14 szelet fér el kényelmesen a keréken!");
+      setStudioError("Legfeljebb 14 szelet fér el kényelmesen a keréken!");
       return;
     }
 
@@ -397,7 +408,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
             ? ""
             : tvMode
             ? "w-80 h-80 sm:w-96 sm:h-96 lg:w-[460px] lg:h-[460px] xl:w-[500px] xl:h-[500px]"
-            : "w-72 h-72 sm:w-84 sm:h-84 lg:w-92 lg:h-92"
+            : "w-72 h-72 sm:w-[21rem] sm:h-[21rem] lg:w-[23rem] lg:h-[23rem]"
         }`}
         style={customWheelSize ? { width: `${customWheelSize}px`, height: `${customWheelSize}px` } : undefined}
         title="Kattints a kerékre a pörgetéshez!"
@@ -514,7 +525,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         createPortal(
           <AnimatePresence>
             {isEditorOpen && (
-              <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/92 backdrop-blur-xl overflow-y-auto">
+              <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/[0.92] backdrop-blur-xl overflow-y-auto">
                 <motion.div
                   initial={{ scale: 0.95, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -668,8 +679,20 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
                         </div>
                       </form>
 
+                      {studioError && (
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/50 text-rose-200 text-xs font-bold">
+                          <span className="flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span>{studioError}</span>
+                          </span>
+                          <button onClick={() => setStudioError(null)} className="text-rose-300 hover:text-white">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
                       {/* FELADVÁNYOK TÁBLÁZATA / LISTÁJA */}
-                      <div className="flex flex-col gap-2 max-h-56 sm:max-h-72 lg:max-h-84 overflow-y-auto pr-1">
+                      <div className="flex flex-col gap-2 max-h-56 sm:max-h-72 lg:max-h-[21rem] overflow-y-auto pr-1">
                         {categories.map((cat, idx) => (
                           <div
                             key={`${cat.id}-${idx}`}
@@ -686,7 +709,10 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
                             <div className="flex items-center gap-1.5 shrink-0 ml-3">
                               <button
                                 onClick={() => {
-                                  if (categories.length >= 14) return alert("Maximum 14 szelet engedélyezett!");
+                                  if (categories.length >= 14) {
+                                    setStudioError("Maximum 14 szelet engedélyezett!");
+                                    return;
+                                  }
                                   setCategories((prev) => [...prev, { ...cat, id: `${cat.id}-${Date.now()}` }]);
                                 }}
                                 className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-amber-300 transition"
@@ -696,7 +722,10 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
                               </button>
                               <button
                                 onClick={() => {
-                                  if (categories.length <= 2) return alert("Legalább 2 szeletnek maradnia kell!");
+                                  if (categories.length <= 2) {
+                                    setStudioError("Legalább 2 szeletnek maradnia kell!");
+                                    return;
+                                  }
                                   setCategories((prev) => prev.filter((_, i) => i !== idx));
                                 }}
                                 className="p-2 rounded-xl bg-neutral-900 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-400 transition"

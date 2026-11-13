@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint src",
+    "test": "node --no-warnings --test tests/*.test.mjs",
+    "check:tracks": "node tools/check-tracks.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
@@ -19,7 +21,6 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20",
     "@types/react": "^19",

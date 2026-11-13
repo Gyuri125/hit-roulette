@@ -49,6 +49,7 @@ interface MusicCardProps {
   tvMode?: boolean;
   tvScale?: number;
   customCardWidth?: number;
+  liveSpectrum?: number[];
 }
 
 export const MusicCard: React.FC<MusicCardProps> = ({
@@ -61,11 +62,13 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   isPlaying = false,
   accentColor = "#f59e0b",
   tvMode = false,
-  tvScale = 100,
+  tvScale: _tvScale = 100,
   customCardWidth,
+  liveSpectrum,
 }) => {
   const [showFrontLyrics, setShowFrontLyrics] = useState(true);
-  const [eqBars, setEqBars] = useState<number[]>(Array(20).fill(15));
+  const [coverImgError, setCoverImgError] = useState(false);
+  const [fallbackEqBars, setFallbackEqBars] = useState<number[]>(Array(20).fill(15));
 
   // 3D Holografikus Tilt & Glare állapotok
   const [tilt, setTilt] = useState<{ rx: number; ry: number; gx: number; gy: number; active: boolean }>({
@@ -81,14 +84,17 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   const frontLyricsRef = useRef<HTMLParagraphElement | null>(null);
   const backLyricsRef = useRef<HTMLParagraphElement | null>(null);
 
-  // Kártyán belüli Neon Audio Visualizer animáció
+  const hasExternalSpectrum = Array.isArray(liveSpectrum) && liveSpectrum.length >= 20;
+
+  // Kártyán belüli Neon Audio Visualizer animáció (ha nincs külső FFT spektrum)
   useEffect(() => {
+    if (hasExternalSpectrum) return;
     if (!isPlaying) {
-      setEqBars(Array(20).fill(12));
+      setFallbackEqBars(Array(20).fill(12));
       return;
     }
     const interval = setInterval(() => {
-      setEqBars(
+      setFallbackEqBars(
         Array.from({ length: 20 }, (_, i) => {
           const centerWeight = 1 - Math.abs(i - 9.5) / 11;
           return Math.max(15, Math.min(100, Math.floor((Math.random() * 75 + 25) * centerWeight)));
@@ -96,7 +102,16 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       );
     }, 110);
     return () => clearInterval(interval);
-  }, [isPlaying]);
+  }, [isPlaying, hasExternalSpectrum]);
+
+  const eqBars = useMemo(() => {
+    if (!hasExternalSpectrum || !liveSpectrum) return fallbackEqBars;
+    if (!isPlaying) return Array(20).fill(12);
+    return Array.from({ length: 20 }, (_, idx) => {
+      const srcIdx = Math.min(liveSpectrum.length - 1, Math.floor((idx / 20) * liveSpectrum.length));
+      return liveSpectrum[srcIdx] ?? 12;
+    });
+  }, [hasExternalSpectrum, liveSpectrum, fallbackEqBars, isPlaying]);
 
   const parsedLyrics = useMemo(() => {
     return parseLrc(track.lyrics || "");
@@ -119,8 +134,9 @@ export const MusicCard: React.FC<MusicCardProps> = ({
     return idx;
   }, [parsedLyrics, currentTime, isSynced]);
 
-  // Dalváltáskor a görgetés azonnal visszaugrik a legtetejére
+  // Dalváltáskor a görgetés azonnal visszaugrik a legtetejére, és borítóhiba reset
   useEffect(() => {
+    setCoverImgError(false);
     if (frontContainerRef.current) {
       frontContainerRef.current.scrollTop = 0;
     }
@@ -292,7 +308,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                   <div
                     ref={frontContainerRef}
                     className={`w-full bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 overflow-y-auto scrollbar-none [mask-image:linear-gradient(to_bottom,transparent_0%,black_12%,black_88%,transparent_100%)] flex flex-col gap-3.5 py-6 transition-all ${
-                      tvMode ? "h-64 sm:h-80 lg:h-92" : "h-56 sm:h-68"
+                      tvMode ? "h-64 sm:h-80 lg:h-[23rem]" : "h-56 sm:h-[17rem]"
                     }`}
                   >
                     {parsedLyrics.map((line, idx) => {
@@ -338,7 +354,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                       <motion.div
                         animate={isPlaying ? { rotate: 360 } : {}}
                         transition={isPlaying ? { repeat: Infinity, duration: 3.5, ease: "linear" } : {}}
-                        className={`relative ${isBigMode ? "w-48 h-48 sm:w-54 sm:h-54" : "w-40 h-40 sm:w-44 sm:h-44"} rounded-full flex items-center justify-center overflow-hidden shadow-inner`}
+                        className={`relative ${isBigMode ? "w-48 h-48 sm:w-[13.5rem] sm:h-[13.5rem]" : "w-40 h-40 sm:w-44 sm:h-44"} rounded-full flex items-center justify-center overflow-hidden shadow-inner`}
                         style={{
                           background: `
                             conic-gradient(from 40deg, transparent 0deg, rgba(255,255,255,0.08) 45deg, transparent 90deg, transparent 180deg, rgba(255,255,255,0.08) 225deg, transparent 270deg),
@@ -470,8 +486,13 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               <div className={`relative rounded-2xl overflow-hidden border-2 border-neutral-700 shadow-2xl bg-neutral-950 flex items-center justify-center shrink-0 transition-all ${
                 isBigMode ? "w-32 h-32 sm:w-40 sm:h-40" : "w-24 h-24 sm:w-28 sm:h-28"
               }`}>
-                {track.coverUrl ? (
-                  <img src={track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
+                {track.coverUrl && !coverImgError ? (
+                  <img
+                    src={track.coverUrl}
+                    alt={track.title}
+                    onError={() => setCoverImgError(true)}
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
                   <div className="w-full h-full bg-gradient-to-tr from-amber-600/30 to-violet-600/30 flex flex-col items-center justify-center p-2 text-center">
                     <Disc3 className="w-9 h-9 text-amber-400 mb-1" />

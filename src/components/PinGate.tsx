@@ -6,6 +6,11 @@ import { Lock, ShieldAlert, KeyRound, ArrowRight, Loader2 } from "lucide-react";
 
 const STORAGE_TOKEN_KEY = "hit_pin_auth_token";
 
+export const getPinAuthToken = (): string | null => {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(STORAGE_TOKEN_KEY);
+};
+
 export const lockPinGate = () => {
   if (typeof window !== "undefined") {
     localStorage.removeItem(STORAGE_TOKEN_KEY);
@@ -45,10 +50,15 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
         setIsUnlocked(false);
       }
     } catch {
-      // Hálózati hiba esetén, ha a token formátuma érvényes és nincs lejárva
+      // Hálózati hiba esetén csak szigorú HMAC-formátumú, nem lejárt tokent fogadunk el átmenetileg
       const parts = token.split(":");
-      const exp = parts[1] ? parseInt(parts[1], 10) : 0;
-      if (exp && Date.now() < exp) {
+      const validFormat =
+        parts.length === 3 &&
+        /^\d+$/.test(parts[0]) &&
+        /^\d+$/.test(parts[1]) &&
+        /^[a-f0-9]{64}$/i.test(parts[2]);
+      const exp = validFormat ? parseInt(parts[1], 10) : 0;
+      if (validFormat && exp && Date.now() < exp) {
         setIsUnlocked(true);
       } else {
         setIsUnlocked(false);
@@ -103,7 +113,10 @@ export const PinGate: React.FC<PinGateProps> = ({ children }) => {
       } else {
         const nextAttempts = failedAttempts + 1;
         setFailedAttempts(nextAttempts);
-        const penaltySeconds = Math.pow(nextAttempts, 2);
+        const penaltySeconds =
+          typeof data?.retryAfter === "number" && data.retryAfter > 0
+            ? data.retryAfter
+            : Math.min(300, Math.pow(nextAttempts, 2));
         setLockTimeLeft(penaltySeconds);
         setErrorMsg(data?.error || `Hibás PIN! Zárolva: ${penaltySeconds} másodpercre.`);
         setPinInput("");
