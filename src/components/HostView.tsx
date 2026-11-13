@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  AlertTriangle,
   BarChart3,
   Bell,
   CalendarRange,
@@ -20,6 +21,7 @@ import {
   Minimize2,
   MoveHorizontal,
   QrCode,
+  RefreshCw,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
@@ -129,8 +131,12 @@ interface HostViewProps {
   setMaxYear: (y: number) => void;
   playedIds: Array<string | number>;
   filteredTracks: Track[];
+  allTracksCount: number;
   currentTrack: Track | undefined;
   isLoadingTracks: boolean;
+  tracksError: string | null;
+  onRetryLoadTracks: () => void;
+  onResetFilters: () => void;
   // Round & Guessing props
   autoPlayCountdown: number | null;
   buzzedPlayer: string | null;
@@ -292,8 +298,12 @@ export const HostView: React.FC<HostViewProps> = ({
   setMaxYear,
   playedIds,
   filteredTracks,
+  allTracksCount,
   currentTrack,
   isLoadingTracks,
+  tracksError,
+  onRetryLoadTracks,
+  onResetFilters,
   autoPlayCountdown,
   buzzedPlayer,
   setBuzzedPlayer,
@@ -1479,10 +1489,33 @@ export const HostView: React.FC<HostViewProps> = ({
                   customCardWidth={isTvMode ? tvCardWidth : undefined}
                   liveSpectrum={liveSpectrum}
                 />
+              ) : allTracksCount === 0 ? (
+                <div className="w-80 h-96 rounded-3xl border-2 border-dashed border-rose-500/40 bg-rose-950/10 flex flex-col items-center justify-center p-6 text-center text-neutral-300 gap-3">
+                  <AlertTriangle className="w-12 h-12 text-rose-400" />
+                  <p className="text-sm font-black text-rose-200">
+                    {tracksError ? "Nem sikerült betölteni a dallistát!" : "A dallista még nincs betöltve"}
+                  </p>
+                  {tracksError && (
+                    <p className="text-[11px] text-rose-300/80 leading-relaxed max-w-[240px]">{tracksError}</p>
+                  )}
+                  <button
+                    onClick={onRetryLoadTracks}
+                    className="mt-1 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 shadow-lg"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Dalok betöltése</span>
+                  </button>
+                </div>
               ) : (
                 <div className="w-80 h-96 rounded-3xl border-2 border-dashed border-neutral-800 flex flex-col items-center justify-center p-6 text-center text-neutral-500 gap-3">
                   <CalendarRange className="w-12 h-12 text-neutral-700" />
                   <p className="text-sm font-bold text-neutral-300">Nincs dal ebben a szűrésben!</p>
+                  <button
+                    onClick={onResetFilters}
+                    className="mt-1 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 text-xs font-bold border border-neutral-700 transition active:scale-95"
+                  >
+                    Szűrők visszaállítása
+                  </button>
                 </div>
               )}
 

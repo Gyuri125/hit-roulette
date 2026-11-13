@@ -50,9 +50,10 @@ interface WakeLockSentinelLike {
   addEventListener: (type: "release", listener: () => void) => void;
 }
 
-export default function Home() {
+function HitRouletteApp() {
   const [allTracks, setAllTracks] = useState<Track[]>([]);
   const [isLoadingTracks, setIsLoadingTracks] = useState<boolean>(true);
+  const [tracksError, setTracksError] = useState<string | null>(null);
 
   const { absoluteMinYear, absoluteMaxYear } = useMemo(() => {
     const validYears = allTracks
@@ -870,6 +871,44 @@ export default function Home() {
     hostHydratedRef.current = true;
   }, []);
 
+  const loadTracks = useCallback(() => {
+    setIsLoadingTracks(true);
+    setTracksError(null);
+    const token = getPinAuthToken();
+    fetch("/api/tracks", {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          lockPinGate();
+          throw new Error("Lejárt vagy érvénytelen PIN munkamenet.");
+        }
+        if (!res.ok) {
+          const payload = await res.json().catch(() => null);
+          throw new Error(payload?.error || `Szerverhiba (${res.status}) a dallista lekérésekor.`);
+        }
+        return res.json();
+      })
+      .then((data: Track[]) => {
+        setAllTracks(Array.isArray(data) ? data : []);
+        setTracksError(null);
+        setIsLoadingTracks(false);
+      })
+      .catch((err) => {
+        console.error("Hiba a dalok betöltésekor:", err);
+        setTracksError(err instanceof Error ? err.message : "Hálózati hiba a dalok betöltésekor.");
+        setIsLoadingTracks(false);
+      });
+  }, []);
+
+  const handleResetFilters = useCallback(() => {
+    setMusicFilter("all");
+    setSelectedGenre("all");
+    setOnlyWithLyrics(false);
+    setMinYear(absoluteMinYear);
+    setMaxYear(absoluteMaxYear);
+  }, [absoluteMinYear, absoluteMaxYear]);
+
   // tracks.json lekérése az API végpontról (csak TV Host számára)
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -888,29 +927,8 @@ export default function Home() {
     }
 
     if (allTracks.length > 0) return;
-
-    setIsLoadingTracks(true);
-    const token = getPinAuthToken();
-    fetch("/api/tracks", {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    })
-      .then((res) => {
-        if (res.status === 401) {
-          lockPinGate();
-          throw new Error("Lejárt vagy érvénytelen PIN munkamenet");
-        }
-        if (!res.ok) throw new Error("Hálózati hiba a dalok lekérésekor");
-        return res.json();
-      })
-      .then((data: Track[]) => {
-        setAllTracks(data);
-        setIsLoadingTracks(false);
-      })
-      .catch((err) => {
-        console.error("Hiba a dalok betöltésekor:", err);
-        setIsLoadingTracks(false);
-      });
-  }, [isJoinedAsClient, isJoinModalOpen, isHostModalOpen, allTracks.length]);
+    loadTracks();
+  }, [isJoinedAsClient, isJoinModalOpen, isHostModalOpen, allTracks.length, loadTracks]);
 
   // Házigazda állapot folyamatos mentése
   useEffect(() => {
@@ -2391,7 +2409,7 @@ export default function Home() {
   const onlinePlayers = players.filter((p) => p.isOnline);
 
   return (
-    <PinGate>
+    <>
       {isJoinModalOpen ? (
         <JoinRoomScreen
           roomCode={roomCode}
@@ -2559,8 +2577,12 @@ export default function Home() {
             setMaxYear={setMaxYear}
             playedIds={playedIds}
             filteredTracks={filteredTracks}
+            allTracksCount={allTracks.length}
             currentTrack={currentTrack}
             isLoadingTracks={isLoadingTracks}
+            tracksError={tracksError}
+            onRetryLoadTracks={loadTracks}
+            onResetFilters={handleResetFilters}
             autoPlayCountdown={autoPlayCountdown}
             buzzedPlayer={buzzedPlayer}
             setBuzzedPlayer={setBuzzedPlayer}
@@ -2625,6 +2647,14 @@ export default function Home() {
           />
         </>
       )}
+    </>
+  );
+}
+
+export default function Home() {
+  return (
+    <PinGate>
+      <HitRouletteApp />
     </PinGate>
   );
 }
